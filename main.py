@@ -1,0 +1,491 @@
+import os
+import sys
+import threading
+import time
+from typing import Any, Dict, List, Optional
+
+import paramiko
+import qbittorrentapi
+import requests
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWidgets import (
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QRadioButton,
+    QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget, QHeaderView
+)
+
+# Strictly load environment variables at the top level
+load_dotenv()
+
+# Instantiate the FastAPI backend
+app = FastAPI(
+    title="Secure PyQt6 + FastAPI Service",
+    description="A cleanly architected Python micro-desktop application.",
+    version="1.0.0"
+)
+
+
+@app.get("/", response_model=Dict[str, str])
+async def root_status() -> Dict[str, str]:
+    """Status endpoint validating the REST server is operational."""
+    return {"status": "success", "message": "Secure Local Server is Running."}
+
+
+def run_server(host: str, port: int) -> None:
+    """Runs the Uvicorn server explicitly bound to a background thread block."""
+    try:
+        config = uvicorn.Config(app=app, host=host, port=port, log_level="info")
+        server = uvicorn.Server(config)
+        server.run()
+    except Exception as e:
+        print(f"Error starting Uvicorn background server: {e}", file=sys.stderr)
+
+
+class SSHTelemetryClient(QThread):
+    """Encapsulated background QThread to execute paramiko commands asynchronously."""
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def run(self) -> None:
+        host = os.getenv("SSH_HOST", "127.0.0.1")
+        user = os.getenv("SSH_USER", "root")
+        password = os.getenv("SSH_PASS", "toor")
+
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # Hard timeout imposed to prevent GUI locking in network edge cases
+            client.connect(hostname=host, username=user, password=password, timeout=10.0)
+
+            # Executing telemetry dump
+            stdin, stdout, stderr = client.exec_command('echo "Encoder Status: OK" && uptime')
+            output = stdout.read().decode('utf-8').strip()
+            client.close()
+
+            self.finished.emit(output)
+        except Exception as e:
+            self.error.emit(f"SSH Telemetry Failed: {str(e)}")
+
+
+class QBittorrentClient(QThread):
+    """Encapsulated background QThread to push torrent bytes and path safely."""
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+    added = pyqtSignal()
+
+    def __init__(self, torrent_bytes: bytes, save_path: str, parent=None) -> None:
+        super().__init__(parent)
+        self.torrent_bytes = torrent_bytes
+        self.save_path = save_path
+
+    def run(self) -> None:
+        host = os.getenv("QBIT_HOST", "127.0.0.1")
+        port = os.getenv("QBIT_PORT", "8080")
+        user = os.getenv("QBIT_USER", "admin")
+        password = os.getenv("QBIT_PASS", "adminadmin")
+
+        try:
+            client = qbittorrentapi.Client(host=f"{host}:{port}", username=user, password=password)
+            client.auth_log_in()
+            res = client.torrents_add(
+                torrent_files={'downloaded.torrent': self.torrent_bytes},
+                save_path=self.save_path
+            )
+            self.finished.emit(f"QBittorrent Push Success! Server Response: {res}")
+            self.added.emit()
+        except Exception as e:
+            self.error.emit(f"QBittorrent Upload Failed: {str(e)}")
+
+
+class TorrentPollingThread(QThread):
+    """Secure polling daemon executing strictly on a synchronized QThread."""
+    data_updated = pyqtSignal(list)
+    torrent_completed = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.active = True
+        self.target_hash: Optional[str] = None
+        self.hashes_before_add: List[str] = []
+        self.host = os.getenv("QBIT_HOST", "127.0.0.1")
+        self.port = os.getenv("QBIT_PORT", "8080")
+        self.user = os.getenv("QBIT_USER", "admin")
+        self.password = os.getenv("QBIT_PASS", "adminadmin")
+
+    def set_pre_add_state(self, hashes: List[str]) -> None:
+        """Takes a volatile snapshot of active torrents to detect the push target."""
+        self.hashes_before_add = hashes
+        self.target_hash = None
+
+    def run(self) -> None:
+        client = qbittorrentapi.Client(host=f"{self.host}:{self.port}", username=self.user, password=self.password)
+        try:
+            client.auth_log_in()
+        except Exception as e:
+            self.error.emit(f"Polling Auth Failed: {str(e)}")
+            return
+
+        while self.active:
+            try:
+                torrents = client.torrents_info()
+                self.data_updated.emit(torrents)
+
+                # Detection logic for dynamically tracking the pushed torrent
+                current_hashes = [t.get('hash') for t in torrents]
+                if not self.target_hash and current_hashes:
+                    for h in current_hashes:
+                        if h not in self.hashes_before_add:
+                            self.target_hash = h
+                            break
+
+                # Continuous state monitoring
+                if self.target_hash:
+                    for t in torrents:
+                        if t.get('hash') == self.target_hash:
+                            prog = t.get('progress', 0.0)
+                            state = t.get('state', '')
+                            if prog == 1.0 or state in ['uploading', 'stalledUP', 'pausedUP', 'completed']:
+                                self.torrent_completed.emit()
+                                self.target_hash = None  # Block cascade loops
+                            break
+
+            except Exception as e:
+                self.error.emit(f"Polling Error: {str(e)}")
+
+            # Controlled polling cadence (no lockups on the event stream)
+            QThread.sleep(2)
+
+    def stop(self) -> None:
+        """Signal teardown to prevent trailing QTimer anomalies."""
+        self.active = False
+        self.wait()
+
+
+class MediaCategoryDialog(QDialog):
+    """Dynamic dialog strictly architected for modular media routing."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Categorize Intersected Media")
+        self.setFixedSize(400, 200)
+
+        self.layout = QVBoxLayout(self)
+
+        # Radio Toggles
+        self.radio_group = QGroupBox("Media Type")
+        self.radio_layout = QHBoxLayout()
+        self.btn_movie = QRadioButton("Movies")
+        self.btn_tv = QRadioButton("TV-Series")
+        self.btn_movie.setChecked(True)
+        self.radio_layout.addWidget(self.btn_movie)
+        self.radio_layout.addWidget(self.btn_tv)
+        self.radio_group.setLayout(self.radio_layout)
+        self.layout.addWidget(self.radio_group)
+
+        # Dynamic Forms Block
+        self.form_layout = QFormLayout()
+
+        # Movie Dropdown (Strict definitions)
+        self.genre_dropdown = QComboBox()
+        self.genre_dropdown.addItems([
+            "action", "adventure", "anime", "bollywood", "cartoons", "comedy",
+            "crime", "detective", "drama", "family", "fantasy", "horror",
+            "romance", "sf", "thriller", "zombie"
+        ])
+
+        # TV LineEdit Input
+        self.series_input = QLineEdit()
+        self.series_input.setPlaceholderText("e.g. breaking bad")
+        
+        # State logic binding (Movies selected by default)
+        self.series_input.hide()
+        
+        self.form_label_genre = QLabel("Genre:")
+        self.form_label_series = QLabel("Series Name:")
+        self.form_label_series.hide()
+
+        self.form_layout.addRow(self.form_label_genre, self.genre_dropdown)
+        self.form_layout.addRow(self.form_label_series, self.series_input)
+        self.layout.addLayout(self.form_layout)
+
+        # Standard dialog execution mapping
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        self.layout.addWidget(self.button_box)
+
+        # Signal bounds
+        self.btn_movie.toggled.connect(self._toggle_inputs)
+        self.btn_tv.toggled.connect(self._toggle_inputs)
+
+    def _toggle_inputs(self) -> None:
+        """Dynamically hides/shows strictly irrelevant inputs based on selected category."""
+        if self.btn_movie.isChecked():
+            self.series_input.hide()
+            self.form_label_series.hide()
+            self.genre_dropdown.show()
+            self.form_label_genre.show()
+        else:
+            self.genre_dropdown.hide()
+            self.form_label_genre.hide()
+            self.series_input.show()
+            self.form_label_series.show()
+
+    def get_relative_path(self) -> str:
+        """Computes the final relative path string per absolute organizational boundaries."""
+        if self.btn_movie.isChecked():
+            genre = self.genre_dropdown.currentText()
+            return f"movies/{genre}"
+        else:
+            name = self.series_input.text().strip().lower().replace(" ", "_")
+            if not name:
+                name = "unknown_series"
+            return f"tv-series/{name}"
+
+
+class SecureServerWindow(QMainWindow):
+    """
+    Main application window strictly encapsulating GUI layout logic in OOP fashion.
+    Forces True Fullscreen architecture and houses the asynchronous services.
+    """
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__()
+        self.setWindowTitle("Secure Enterprise Local Server")
+        self.showFullScreen()
+
+        # In-memory torrent state allocations
+        self.torrent_bytes: Optional[bytes] = None
+        self.download_url: str = ""
+        self.relative_path: str = ""
+
+        # Tracking active pipeline strings
+        self.current_qbit_hashes: List[str] = []
+
+        central_widget = QWidget()
+        self.main_layout = QVBoxLayout(central_widget)
+
+        # Status Label Implementation
+        env_mode = os.getenv("APP_ENV", "development")
+        self.status_label = QLabel(
+            f"Mode: {env_mode.upper()}\n"
+            f"Backend Status: Running\n"
+            f"Location: {host}:{port}\n"
+            f"Active Torrent Target: None"
+        )
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #f39c12;")
+        self.main_layout.addWidget(self.status_label)
+
+        # Actions Panel Implementation
+        action_layout = QHBoxLayout()
+
+        self.btn_web = QPushButton("1. Open Filelist Browser")
+        self.btn_qbit = QPushButton("2. Push to qBittorrent Engine")
+        self.btn_ssh = QPushButton("3. SSH Telemetry Pull")
+        self.btn_exit = QPushButton("Exit Fullscreen")
+
+        # Layout integration
+        action_layout.addWidget(self.btn_web)
+        action_layout.addWidget(self.btn_qbit)
+        action_layout.addWidget(self.btn_ssh)
+        action_layout.addWidget(self.btn_exit)
+        self.main_layout.addLayout(action_layout)
+
+        # Explicit Event Hook Mappings
+        self.btn_web.clicked.connect(self._toggle_browser)
+        self.btn_qbit.clicked.connect(self._push_to_qbit)
+        self.btn_ssh.clicked.connect(self._pull_ssh)
+        self.btn_exit.clicked.connect(self.close)
+
+        # Structural Split
+        split_layout = QHBoxLayout()
+
+        # Output Telemetry Console
+        self.console = QTextEdit()
+        self.console.setReadOnly(True)
+        self.console.setStyleSheet("background-color: #1e1e1e; color: #00ff00; font-family: monospace; font-size: 10pt;")
+        split_layout.addWidget(self.console, stretch=1)
+
+        # Torrent Data Dashboard UI (polling sink)
+        self.torrent_table = QTableWidget(0, 4)
+        self.torrent_table.setHorizontalHeaderLabels(["Name", "Size", "Progress", "State"])
+        self.torrent_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.torrent_table.setStyleSheet("background-color: #2b2b2b; color: #ffffff;")
+        split_layout.addWidget(self.torrent_table, stretch=2)
+
+        self.main_layout.addLayout(split_layout)
+
+        # Central Viewport Element
+        self.web_view = QWebEngineView()
+        self.web_view.hide()
+        self.main_layout.addWidget(self.web_view, stretch=1)
+
+        # Chromium Pipeline Interception Slot
+        profile = self.web_view.page().profile()
+        profile.downloadRequested.connect(self._on_download_requested)
+
+        self.setCentralWidget(central_widget)
+
+        # Instantiating Live Polling on secondary CPU block
+        self._start_torrent_polling()
+
+    def _start_torrent_polling(self) -> None:
+        """Isolated binding for QThread QTimer logic."""
+        self.poll_worker = TorrentPollingThread()
+        self.poll_worker.data_updated.connect(self._update_torrent_table)
+        self.poll_worker.torrent_completed.connect(self._on_torrent_target_complete)
+        self.poll_worker.error.connect(self.log_console)
+        self.poll_worker.start()
+
+    def _update_torrent_table(self, torrents: List[Dict[str, Any]]) -> None:
+        """Securely executes back on Qt MainThread strictly processing UI layout mutations."""
+        self.current_qbit_hashes = [t.get('hash', '') for t in torrents]
+        self.torrent_table.setRowCount(len(torrents))
+        for row, t in enumerate(torrents):
+            name = t.get('name', 'Unknown')
+            size = f"{t.get('size', 0) / (1024**2):.2f} MB"
+            prog = f"{t.get('progress', 0) * 100:.1f}%"
+            state = t.get('state', 'Unknown')
+
+            self.torrent_table.setItem(row, 0, QTableWidgetItem(name))
+            self.torrent_table.setItem(row, 1, QTableWidgetItem(size))
+            self.torrent_table.setItem(row, 2, QTableWidgetItem(prog))
+            self.torrent_table.setItem(row, 3, QTableWidgetItem(state))
+
+    def _on_torrent_target_complete(self) -> None:
+        """Fires safely in MainThread when daemon target states completion logic bounds are hit."""
+        self.log_console("Target Tracking Alert: Upload/Download pipeline marked COMPLETED.")
+        self.btn_qbit.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        self.btn_qbit.setText("2. ✔ Push Complete")
+
+    def log_console(self, text: str) -> None:
+        """Appends output securely to the read-only dashboard console."""
+        self.console.append(f"> {text}")
+
+    def _toggle_browser(self) -> None:
+        if self.web_view.isHidden():
+            self.web_view.show()
+            self.web_view.setUrl(QUrl("https://filelist.io/"))
+            self.log_console("Engine instantiated.")
+        else:
+            self.web_view.hide()
+
+    def _on_download_requested(self, request: QWebEngineDownloadRequest) -> None:
+        """Intercepts Qt's file-based download pipeline."""
+        self.download_url = request.url().toString()
+        request.cancel()  # MANDATORY directive: Stop generic disk writes.
+        self.log_console(f"Intercepting download stream natively: {self.download_url}")
+
+        # Async script injection to extrapolate JS scope into Python runtime
+        self.web_view.page().runJavaScript("document.cookie", self._download_stream_to_memory)
+
+    def _download_stream_to_memory(self, cookie_string: str) -> None:
+        """Completes the in-memory bridge and spawns synchronous Categorization UX mapping."""
+        try:
+            headers = {
+                "Cookie": cookie_string,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64) Chrome/114.0.0.0 Safari/537.36"
+            }
+            # Strictly blocked via native request implementation, but rapid execution
+            response = requests.get(self.download_url, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            self.torrent_bytes = response.content
+            self.web_view.hide()
+            self.log_console("Stream acquired natively. Spawning Dialog intercept parameters...")
+
+            # Modal Event Loop Hijack
+            dialog = MediaCategoryDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.relative_path = dialog.get_relative_path()
+                self.log_console(f"Categorization String Defined -> {self.relative_path}")
+
+                # Success Mutation
+                self.btn_web.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+                self.btn_web.setText("1. ✔ Torrent Assigned")
+
+                # State Overlay Shift
+                env_mode = os.getenv("APP_ENV", "development")
+                self.status_label.setText(
+                    f"Mode: {env_mode.upper()}\n"
+                    f"Backend Status: Running\n"
+                    f"Location: {os.getenv('SERVER_HOST')}:{os.getenv('LOCAL_PORT')}\n"
+                    f"Active Torrent Target: {self.relative_path}"
+                )
+            else:
+                self.log_console("User aborted categorization flow. Torrent cache in volatile state voided.")
+                self.torrent_bytes = None
+
+        except Exception as e:
+            self.log_console(f"CRITICAL ERROR: In-memory network acquisition collapsed: {str(e)}")
+
+    def _push_to_qbit(self) -> None:
+        """Dispatches fully constructed state packet into off-the-books network loop."""
+        if not self.torrent_bytes or not self.relative_path:
+            self.log_console("FATAL: Torrent stream unassigned or categorization absent. Obtain via GUI Engine block.")
+            return
+
+        base_path = os.getenv("BASE_SCRATCH_PATH", "/data/scratch")
+        
+        # OS-agnostic native path binding formatting
+        final_save_path = f"{base_path}/{self.relative_path}".replace("\\", "/")
+
+        self.log_console(f"Pushing dynamically categorized data structures to -> {final_save_path}")
+
+        # Mark heuristic map point for TorPolling tracking
+        self.poll_worker.set_pre_add_state(self.current_qbit_hashes)
+
+        # Isolate pushing to decoupled class routine
+        self.qbit_worker = QBittorrentClient(self.torrent_bytes, final_save_path)
+        self.qbit_worker.finished.connect(self.log_console)
+        self.qbit_worker.error.connect(self.log_console)
+        self.qbit_worker.start()
+
+    def _pull_ssh(self) -> None:
+        """Routes SSH stream request to decoupled QThread block."""
+        self.log_console("Spawning secure Paramiko QThread stream link...")
+        self.ssh_worker = SSHTelemetryClient()
+        self.ssh_worker.finished.connect(self.log_console)
+        self.ssh_worker.error.connect(self.log_console)
+        self.ssh_worker.start()
+
+    def closeEvent(self, event) -> None:
+        """Overrides generic exit to dismantle active background pooling loops correctly."""
+        self.poll_worker.stop()
+        super().closeEvent(event)
+
+
+def main() -> None:
+    # 1. Configuration & Secrets extraction
+    server_host: str = os.getenv("SERVER_HOST", "127.0.0.1")
+    port_str: str = os.getenv("LOCAL_PORT", "9000")
+
+    try:
+        server_port: int = int(port_str)
+    except ValueError:
+        server_port = 9000
+
+    # 2. Asynchronous API loop isolated outside Qt domain
+    server_thread = threading.Thread(
+        target=run_server,
+        args=(server_host, server_port),
+        daemon=True
+    )
+    server_thread.start()
+
+    # 3. Synchronous QT Object Root
+    qt_app = QApplication(sys.argv)
+    main_window = SecureServerWindow(host=server_host, port=server_port)
+    main_window.showFullScreen()
+
+    # 4. Process execution block override
+    sys.exit(qt_app.exec())
+
+
+if __name__ == "__main__":
+    main()
