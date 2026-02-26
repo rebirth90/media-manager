@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import threading
 import time
@@ -10,13 +11,14 @@ import requests
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QRadioButton,
-    QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget, QHeaderView
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QProgressBar, QPushButton,
+    QRadioButton, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout,
+    QWidget, QHeaderView
 )
 
 # Strictly load environment variables at the top level
@@ -48,13 +50,14 @@ def run_server(host: str, port: int) -> None:
 
 class SSHTelemetryClient(QThread):
     """Encapsulated background QThread to execute paramiko commands asynchronously."""
-    finished = pyqtSignal(str)
+    telemetry_data = pyqtSignal(str, str, str, int)
     error = pyqtSignal(str)
 
     def run(self) -> None:
         host = os.getenv("SSH_HOST", "127.0.0.1")
         user = os.getenv("SSH_USER", "root")
         password = os.getenv("SSH_PASS", "toor")
+        remote_app_dir = os.getenv("REMOTE_APP_DIR", "/opt/movie-conversion")
 
         try:
             client = paramiko.SSHClient()
@@ -62,14 +65,32 @@ class SSHTelemetryClient(QThread):
             # Hard timeout imposed to prevent GUI locking in network edge cases
             client.connect(hostname=host, username=user, password=password, timeout=10.0)
 
-            # Executing telemetry dump
-            stdin, stdout, stderr = client.exec_command('echo "Encoder Status: OK" && uptime')
-            output = stdout.read().decode('utf-8').strip()
-            client.close()
+            db_out = self._exec_cmd(client, f'sqlite3 {remote_app_dir}/conversion_data.db -header -column "SELECT id, status, path FROM jobs;"')
+            gen_out = self._exec_cmd(client, 'tail -n 15 /var/log/conversion/app.log')
+            ff_out = self._exec_cmd(client, 'LATEST_LOG=$(ls -t /var/log/conversion/ffmpeg/*.log 2>/dev/null | head -n 1); if [ -n "$LATEST_LOG" ]; then tail -n 15 "$LATEST_LOG"; else echo "No active logs found."; fi')
 
-            self.finished.emit(output)
+            client.close()
+            prog = self._calculate_conversion_progress(ff_out)
+            self.telemetry_data.emit(db_out, gen_out, ff_out, prog)
         except Exception as e:
             self.error.emit(f"SSH Telemetry Failed: {str(e)}")
+
+    def _exec_cmd(self, client: paramiko.SSHClient, command: str) -> str:
+        stdin, stdout, stderr = client.exec_command(command)
+        output = stdout.read().decode('utf-8').strip()
+        if not output:
+             return "No data found."
+        return output
+
+    def _calculate_conversion_progress(self, ff_log: str) -> int:
+        matches = re.findall(r"time=(\d{2}):(\d{2}):(\d{2})", ff_log)
+        if not matches:
+            return 0
+        h, m, s = matches[-1]
+        total_seconds = int(h) * 3600 + int(m) * 60 + int(s)
+        # Mock total duration to 2 hours (7200 seconds)
+        percentage = int((total_seconds / 7200) * 100)
+        return min(percentage, 100)
 
 
 class QBittorrentClient(QThread):
@@ -90,7 +111,7 @@ class QBittorrentClient(QThread):
         password = os.getenv("QBIT_PASS", "adminadmin")
 
         try:
-            client = qbittorrentapi.Client(host=f"{host}:{port}", username=user, password=password)
+            client = qbittorrentapi.Client(host=f"http://{host}:{port}", username=user, password=password)
             client.auth_log_in()
             res = client.torrents_add(
                 torrent_files={'downloaded.torrent': self.torrent_bytes},
@@ -106,6 +127,7 @@ class TorrentPollingThread(QThread):
     """Secure polling daemon executing strictly on a synchronized QThread."""
     data_updated = pyqtSignal(list)
     torrent_completed = pyqtSignal()
+    target_progress = pyqtSignal(int)
     error = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -149,6 +171,7 @@ class TorrentPollingThread(QThread):
                     for t in torrents:
                         if t.get('hash') == self.target_hash:
                             prog = t.get('progress', 0.0)
+                            self.target_progress.emit(int(prog * 100))
                             state = t.get('state', '')
                             if prog == 1.0 or state in ['uploading', 'stalledUP', 'pausedUP', 'completed']:
                                 self.torrent_completed.emit()
@@ -281,12 +304,27 @@ class SecureServerWindow(QMainWindow):
         self.status_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #f39c12;")
         self.main_layout.addWidget(self.status_label)
 
+        # Progress Bars Layer
+        progress_layout = QHBoxLayout()
+        self.qbit_progress = QProgressBar()
+        self.qbit_progress.setRange(0, 100)
+        self.qbit_progress.setFormat("Download: %p%")
+        progress_layout.addWidget(self.qbit_progress)
+
+        self.conv_progress = QProgressBar()
+        self.conv_progress.setRange(0, 100)
+        self.conv_progress.setFormat("Conversion: %p%")
+        progress_layout.addWidget(self.conv_progress)
+
+        self.main_layout.addLayout(progress_layout)
+
         # Actions Panel Implementation
         action_layout = QHBoxLayout()
 
         self.btn_web = QPushButton("1. Open Filelist Browser")
         self.btn_qbit = QPushButton("2. Push to qBittorrent Engine")
         self.btn_ssh = QPushButton("3. SSH Telemetry Pull")
+        self.btn_ssh.setCheckable(True)
         self.btn_exit = QPushButton("Exit Fullscreen")
 
         # Layout integration
@@ -299,24 +337,59 @@ class SecureServerWindow(QMainWindow):
         # Explicit Event Hook Mappings
         self.btn_web.clicked.connect(self._toggle_browser)
         self.btn_qbit.clicked.connect(self._push_to_qbit)
-        self.btn_ssh.clicked.connect(self._pull_ssh)
+        self.btn_ssh.clicked.connect(self._toggle_ssh_telemetry)
         self.btn_exit.clicked.connect(self.close)
 
-        # Structural Split
-        split_layout = QHBoxLayout()
+        # Live Tail Polling Hook
+        self.ssh_timer = QTimer(self)
+        self.ssh_timer.timeout.connect(self._pull_ssh)
+        self.ssh_timer.setInterval(3000)
 
-        # Output Telemetry Console
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setStyleSheet("background-color: #1e1e1e; color: #00ff00; font-family: monospace; font-size: 10pt;")
-        split_layout.addWidget(self.console, stretch=1)
+        # Structural Split
+        split_layout = QVBoxLayout()
+
+        # Telemetry Panels Layer
+        telemetry_layout = QHBoxLayout()
+
+        # Database Queue
+        self.db_table = QTableWidget(0, 3)
+        self.db_table.setHorizontalHeaderLabels(["ID", "Status", "Path"])
+        self.db_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.db_table.setStyleSheet("background-color: #2b2b2b; color: #ffffff;")
+        db_group = QGroupBox("Live Database Queue")
+        db_layout = QVBoxLayout()
+        db_layout.addWidget(self.db_table)
+        db_group.setLayout(db_layout)
+        telemetry_layout.addWidget(db_group, stretch=1)
+
+        # General App Log
+        self.gen_log = QTextEdit()
+        self.gen_log.setReadOnly(True)
+        self.gen_log.setStyleSheet("background-color: #1e1e1e; color: #00ff00; font-family: monospace; font-size: 9pt;")
+        gen_group = QGroupBox("General App Log")
+        gen_layout = QVBoxLayout()
+        gen_layout.addWidget(self.gen_log)
+        gen_group.setLayout(gen_layout)
+        telemetry_layout.addWidget(gen_group, stretch=1)
+
+        # FFmpeg Encode Log
+        self.ffmpeg_log = QTextEdit()
+        self.ffmpeg_log.setReadOnly(True)
+        self.ffmpeg_log.setStyleSheet("background-color: #1e1e1e; color: #f39c12; font-family: monospace; font-size: 9pt;")
+        ffmpeg_group = QGroupBox("FFmpeg Encode Log")
+        ffmpeg_layout = QVBoxLayout()
+        ffmpeg_layout.addWidget(self.ffmpeg_log)
+        ffmpeg_group.setLayout(ffmpeg_layout)
+        telemetry_layout.addWidget(ffmpeg_group, stretch=1)
+
+        split_layout.addLayout(telemetry_layout, stretch=2)
 
         # Torrent Data Dashboard UI (polling sink)
         self.torrent_table = QTableWidget(0, 4)
         self.torrent_table.setHorizontalHeaderLabels(["Name", "Size", "Progress", "State"])
         self.torrent_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.torrent_table.setStyleSheet("background-color: #2b2b2b; color: #ffffff;")
-        split_layout.addWidget(self.torrent_table, stretch=2)
+        split_layout.addWidget(self.torrent_table, stretch=1)
 
         self.main_layout.addLayout(split_layout)
 
@@ -339,6 +412,7 @@ class SecureServerWindow(QMainWindow):
         self.poll_worker = TorrentPollingThread()
         self.poll_worker.data_updated.connect(self._update_torrent_table)
         self.poll_worker.torrent_completed.connect(self._on_torrent_target_complete)
+        self.poll_worker.target_progress.connect(self.qbit_progress.setValue)
         self.poll_worker.error.connect(self.log_console)
         self.poll_worker.start()
 
@@ -365,7 +439,8 @@ class SecureServerWindow(QMainWindow):
 
     def log_console(self, text: str) -> None:
         """Appends output securely to the read-only dashboard console."""
-        self.console.append(f"> {text}")
+        if hasattr(self, 'gen_log'):
+            self.gen_log.append(f"> {text}")
 
     def _toggle_browser(self) -> None:
         if self.web_view.isHidden():
@@ -446,13 +521,49 @@ class SecureServerWindow(QMainWindow):
         self.qbit_worker.error.connect(self.log_console)
         self.qbit_worker.start()
 
+    def _toggle_ssh_telemetry(self) -> None:
+        if self.btn_ssh.isChecked():
+            self.btn_ssh.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+            self.btn_ssh.setText("3. Stop Telemetry")
+            self._pull_ssh()
+            self.ssh_timer.start()
+        else:
+            self.btn_ssh.setStyleSheet("")
+            self.btn_ssh.setText("3. SSH Telemetry Pull")
+            self.ssh_timer.stop()
+
     def _pull_ssh(self) -> None:
         """Routes SSH stream request to decoupled QThread block."""
-        self.log_console("Spawning secure Paramiko QThread stream link...")
+        if hasattr(self, 'ssh_worker') and self.ssh_worker.isRunning():
+            return
+
         self.ssh_worker = SSHTelemetryClient()
-        self.ssh_worker.finished.connect(self.log_console)
+        self.ssh_worker.telemetry_data.connect(self._update_telemetry_ui)
         self.ssh_worker.error.connect(self.log_console)
         self.ssh_worker.start()
+
+    def _update_telemetry_ui(self, db_out: str, gen_out: str, ff_out: str, prog: int) -> None:
+        """Updates GUI from thread-safe signals."""
+        self.conv_progress.setValue(prog)
+        if hasattr(self, 'gen_log'):
+            self.gen_log.setText(gen_out)
+            self.ffmpeg_log.setText(ff_out)
+        
+        # Parse DB output
+        lines = db_out.split('\n')
+        # We skip the first 2 lines (header and dashes)
+        if len(lines) > 2:
+            data_lines = lines[2:]
+            self.db_table.setRowCount(len(data_lines))
+            for row, line in enumerate(data_lines):
+                parts = re.split(r'\s{2,}', line.strip())
+                if len(parts) < 3:
+                     parts = line.split(maxsplit=2)
+                for col, part in enumerate(parts[:3]):
+                    if part:
+                        self.db_table.setItem(row, col, QTableWidgetItem(part))
+        else:
+            self.db_table.setRowCount(0)
 
     def closeEvent(self, event) -> None:
         """Overrides generic exit to dismantle active background pooling loops correctly."""
