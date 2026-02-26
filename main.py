@@ -134,6 +134,7 @@ class TorrentPollingThread(QThread):
         super().__init__(parent)
         self.active = True
         self.target_hash: Optional[str] = None
+        self.is_waiting_for_new_target: bool = False
         self.hashes_before_add: List[str] = []
         self.host = os.getenv("QBIT_HOST", "127.0.0.1")
         self.port = os.getenv("QBIT_PORT", "8080")
@@ -144,6 +145,7 @@ class TorrentPollingThread(QThread):
         """Takes a volatile snapshot of active torrents to detect the push target."""
         self.hashes_before_add = hashes
         self.target_hash = None
+        self.is_waiting_for_new_target = True
 
     def run(self) -> None:
         client = qbittorrentapi.Client(host=f"{self.host}:{self.port}", username=self.user, password=self.password)
@@ -156,20 +158,24 @@ class TorrentPollingThread(QThread):
         while self.active:
             try:
                 torrents = client.torrents_info()
-                self.data_updated.emit(torrents)
+                current_hashes = [t.get('hash') for t in torrents]
 
                 # Detection logic for dynamically tracking the pushed torrent
-                current_hashes = [t.get('hash') for t in torrents]
-                if not self.target_hash and current_hashes:
+                if self.is_waiting_for_new_target and current_hashes:
                     for h in current_hashes:
                         if h not in self.hashes_before_add:
                             self.target_hash = h
+                            self.is_waiting_for_new_target = False
                             break
+
+                # Filter datablock for UI representation
+                target_torrent_data = []
 
                 # Continuous state monitoring
                 if self.target_hash:
                     for t in torrents:
                         if t.get('hash') == self.target_hash:
+                            target_torrent_data.append(t)
                             prog = t.get('progress', 0.0)
                             self.target_progress.emit(int(prog * 100))
                             state = t.get('state', '')
@@ -177,6 +183,9 @@ class TorrentPollingThread(QThread):
                                 self.torrent_completed.emit()
                                 self.target_hash = None  # Block cascade loops
                             break
+                            
+                # Push only the targeted payload (or empty list if none) and all background hashes
+                self.data_updated.emit([target_torrent_data, current_hashes])
 
             except Exception as e:
                 self.error.emit(f"Polling Error: {str(e)}")
@@ -401,6 +410,7 @@ class SecureServerWindow(QMainWindow):
         # Chromium Pipeline Interception Slot
         profile = self.web_view.page().profile()
         profile.downloadRequested.connect(self._on_download_requested)
+        self.web_view.page().loadFinished.connect(self._on_page_loaded)
 
         self.setCentralWidget(central_widget)
 
@@ -416,11 +426,15 @@ class SecureServerWindow(QMainWindow):
         self.poll_worker.error.connect(self.log_console)
         self.poll_worker.start()
 
-    def _update_torrent_table(self, torrents: List[Dict[str, Any]]) -> None:
+    def _update_torrent_table(self, data_payload: List[Any]) -> None:
         """Securely executes back on Qt MainThread strictly processing UI layout mutations."""
-        self.current_qbit_hashes = [t.get('hash', '') for t in torrents]
-        self.torrent_table.setRowCount(len(torrents))
-        for row, t in enumerate(torrents):
+        target_torrents, all_hashes_in_background = data_payload
+        
+        # Maintain background hash state for `set_pre_add_state` tracking
+        self.current_qbit_hashes = all_hashes_in_background
+        
+        self.torrent_table.setRowCount(len(target_torrents))
+        for row, t in enumerate(target_torrents):
             name = t.get('name', 'Unknown')
             size = f"{t.get('size', 0) / (1024**2):.2f} MB"
             prog = f"{t.get('progress', 0) * 100:.1f}%"
@@ -445,40 +459,76 @@ class SecureServerWindow(QMainWindow):
     def _toggle_browser(self) -> None:
         if self.web_view.isHidden():
             self.web_view.show()
-            self.web_view.setUrl(QUrl("https://filelist.io/"))
-            self.log_console("Engine instantiated.")
+            self.web_view.setUrl(QUrl("https://filelist.io/login.php"))
+            self.log_console("Engine instantiated for Automated Login Sequence.")
         else:
             self.web_view.hide()
 
     def _on_download_requested(self, request: QWebEngineDownloadRequest) -> None:
-        """Intercepts Qt's file-based download pipeline."""
+        """Intercepts Qt's file-based download pipeline to natively push to disk."""
         self.download_url = request.url().toString()
-        request.cancel()  # MANDATORY directive: Stop generic disk writes.
-        self.log_console(f"Intercepting download stream natively: {self.download_url}")
+        temp_dir = os.path.join(os.getcwd(), "temp_torrents")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        request.setDownloadDirectory(temp_dir)
+        request.accept()
+        request.stateChanged.connect(lambda state: self._on_download_state_changed(state, request))
+        
+        self.log_console(f"Intercepting download stream natively to disk: {temp_dir}")
 
-        # Async script injection to extrapolate JS scope into Python runtime
-        self.web_view.page().runJavaScript("document.cookie", self._download_stream_to_memory)
+    def _on_page_loaded(self, ok: bool) -> None:
+        """Automates Filelist authentication loop strictly post-DOM load."""
+        if not ok:
+            return
 
-    def _download_stream_to_memory(self, cookie_string: str) -> None:
-        """Completes the in-memory bridge and spawns synchronous Categorization UX mapping."""
-        try:
-            headers = {
-                "Cookie": cookie_string,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64) Chrome/114.0.0.0 Safari/537.36"
-            }
-            # Strictly blocked via native request implementation, but rapid execution
-            response = requests.get(self.download_url, headers=headers, timeout=15)
-            response.raise_for_status()
+        current_url = self.web_view.url().toString()
+        if "login.php" in current_url:
+            self.log_console("Automating Filelist Security Challenge...")
 
-            self.torrent_bytes = response.content
+            user = os.getenv("FILELIST_USER", "")
+            password = os.getenv("FILELIST_PASS", "")
+
+            # Javascript DOM injection payload addressing input elements securely
+            js_code = f"""
+                (function() {{
+                    var userField = document.querySelector('input[name="username"]');
+                    var passField = document.querySelector('input[name="password"]');
+                    var unlockBox = document.querySelector('input[name="unlock"]');
+                    var submitBtn = document.querySelector('input[type="submit"]');
+
+                    if(userField && passField && unlockBox) {{
+                        userField.value = "{user}";
+                        passField.value = "{password}";
+                        unlockBox.checked = true;
+                        if(submitBtn) {{
+                            submitBtn.click();
+                        }} else {{
+                            document.forms[0].submit();
+                        }}
+                    }}
+                }})();
+            """
+            self.web_view.page().runJavaScript(js_code)
+
+    def _on_download_state_changed(self, state: QWebEngineDownloadRequest.DownloadState, request: QWebEngineDownloadRequest) -> None:
+        """Tracks the lifecycle of the torrent file arriving on disk."""
+        if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+            file_path = request.downloadDirectory() + os.sep + request.downloadFileName()
             self.web_view.hide()
-            self.log_console("Stream acquired natively. Spawning Dialog intercept parameters...")
+            self.log_console(f"Stream acquired natively to disk: {file_path}. Spawning Dialog...")
+            self._process_downloaded_torrent(file_path)
 
+    def _process_downloaded_torrent(self, file_path: str) -> None:
+        """Completes the disk bridge, spawns synchronous Categorization UX mapping, and cleans up."""
+        try:
             # Modal Event Loop Hijack
             dialog = MediaCategoryDialog(self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 self.relative_path = dialog.get_relative_path()
                 self.log_console(f"Categorization String Defined -> {self.relative_path}")
+                
+                with open(file_path, "rb") as f:
+                    self.torrent_bytes = f.read()
 
                 # Success Mutation
                 self.btn_web.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
@@ -492,12 +542,17 @@ class SecureServerWindow(QMainWindow):
                     f"Location: {os.getenv('SERVER_HOST')}:{os.getenv('LOCAL_PORT')}\n"
                     f"Active Torrent Target: {self.relative_path}"
                 )
+                self._push_to_qbit()
             else:
                 self.log_console("User aborted categorization flow. Torrent cache in volatile state voided.")
                 self.torrent_bytes = None
 
         except Exception as e:
-            self.log_console(f"CRITICAL ERROR: In-memory network acquisition collapsed: {str(e)}")
+            self.log_console(f"CRITICAL ERROR: Native file acquisition collapsed: {str(e)}")
+        finally:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                self.log_console("Volatile file state purged from local IO.")
 
     def _push_to_qbit(self) -> None:
         """Dispatches fully constructed state packet into off-the-books network loop."""
