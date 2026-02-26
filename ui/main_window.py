@@ -15,106 +15,116 @@ class SecureServerWindow(QMainWindow):
         self.setWindowTitle("Media Manager - Enterprise Dashboard")
         self.showFullScreen()
         
-        # Modern gradient background inspired by mockup
+        # Refined gradient background inspired by mockup - softer, more professional
         self.setStyleSheet("""
             QMainWindow { 
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #e8f4f8, stop:0.5 #f0f4f8, stop:1 #e0e8f0);
-                font-family: 'Segoe UI', Arial, sans-serif; 
+                    stop:0 #dce9f2, stop:0.3 #e8f2f8, stop:0.7 #e0edf5, stop:1 #d5e5f0);
+                font-family: 'Segoe UI', 'San Francisco', 'Helvetica Neue', Arial, sans-serif; 
             }
         """)
 
         self.central_w = QWidget()
         self.main_layout = QVBoxLayout(self.central_w)
-        self.main_layout.setContentsMargins(40, 30, 40, 20)
-        self.main_layout.setSpacing(20)
+        self.main_layout.setContentsMargins(50, 35, 50, 25)
+        self.main_layout.setSpacing(25)
 
-        # Top navigation bar - cleaner design
+        # Top navigation bar - mockup-inspired clean design
         nav_layout = QHBoxLayout()
-        nav_layout.setSpacing(15)
+        nav_layout.setSpacing(18)
         
-        # Add button with icon-like styling
+        # Add button with refined styling matching mockup
         self.btn_add_torrent = QPushButton("+ Movie / TV-Series")
-        self.btn_add_torrent.setFixedHeight(45)
+        self.btn_add_torrent.setFixedHeight(48)
+        self.btn_add_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_torrent.setStyleSheet("""
             QPushButton { 
-                background-color: #a8d5e8; 
-                color: #1e3a5f; 
+                background-color: #9dc9e0; 
+                color: #0f2847; 
                 border: none; 
-                border-radius: 22px; 
-                padding: 0 24px; 
+                border-radius: 24px; 
+                padding: 0 28px; 
                 font-weight: 600; 
-                font-size: 11pt;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                font-size: 11.5pt;
+                box-shadow: 0 3px 10px rgba(60, 120, 160, 0.15);
             }
             QPushButton:hover { 
-                background-color: #8ec5de; 
-                color: #0f2847; 
+                background-color: #7db8d5; 
+                color: #081a2e; 
+                box-shadow: 0 4px 14px rgba(60, 120, 160, 0.22);
             }
             QPushButton:pressed {
-                background-color: #7ab8d4;
+                background-color: #6ba8c8;
+                transform: scale(0.98);
             }
         """)
         self.btn_add_torrent.clicked.connect(self._spawn_browser_modal_with_blur)
         
-        # Modern search bar
+        # Refined search bar matching mockup design
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("🔍 Search")
-        self.search_bar.setFixedHeight(45)
-        self.search_bar.setMaximumWidth(450)
+        self.search_bar.setFixedHeight(48)
+        self.search_bar.setMaximumWidth(480)
         self.search_bar.setStyleSheet("""
             QLineEdit { 
                 background-color: #ffffff; 
-                border: 2px solid #d0e4f0; 
-                border-radius: 22px; 
-                padding-left: 20px; 
-                padding-right: 20px;
-                font-size: 10pt; 
-                color: #475569;
+                border: 2px solid #c8d8e8; 
+                border-radius: 24px; 
+                padding-left: 24px; 
+                padding-right: 24px;
+                font-size: 10.5pt; 
+                color: #3d4f60;
             }
             QLineEdit:focus {
-                border: 2px solid #8ec5de;
+                border: 2px solid #7db8d5;
+                background-color: #fcfdff;
+            }
+            QLineEdit::placeholder {
+                color: #a0b0c0;
             }
         """)
         
-        # Bell notification button with modern styling
+        # Bell notification button with refined styling
         self.btn_notif = QPushButton("🔔")
-        self.btn_notif.setFixedSize(45, 45)
+        self.btn_notif.setFixedSize(48, 48)
+        self.btn_notif.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_notif.setStyleSheet("""
             QPushButton { 
                 background-color: #ffffff; 
-                border: 2px solid #d0e4f0; 
-                border-radius: 22px; 
-                font-size: 16pt;
+                border: 2px solid #c8d8e8; 
+                border-radius: 24px; 
+                font-size: 17pt;
             } 
             QPushButton:hover { 
                 background-color: #f0f8ff; 
-                border-color: #8ec5de;
+                border-color: #7db8d5;
+                box-shadow: 0 2px 8px rgba(60, 120, 160, 0.12);
             }
         """)
         
         nav_layout.addWidget(self.btn_add_torrent)
         nav_layout.addStretch()
         nav_layout.addWidget(self.search_bar)
-        nav_layout.addSpacing(10)
+        nav_layout.addSpacing(12)
         nav_layout.addWidget(self.btn_notif)
         
         self.main_layout.addLayout(nav_layout)
 
-        # Main content container with card-like appearance
+        # Main content container with enhanced card styling
         self.canvas_container = QWidget()
         self.canvas_container.setStyleSheet("""
             QWidget { 
-                background-color: #ffffff; 
-                border-radius: 20px;
-                border: 1px solid #e0e8f0;
+                background-color: rgba(255, 255, 255, 0.95); 
+                border-radius: 24px;
+                border: 1px solid #d8e4f0;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
             }
         """)
         canvas_layout = QVBoxLayout(self.canvas_container)
-        canvas_layout.setContentsMargins(25, 25, 25, 25)
-        canvas_layout.setSpacing(15)
+        canvas_layout.setContentsMargins(30, 28, 30, 28)
+        canvas_layout.setSpacing(18)
 
-        # Scrollable content area
+        # Scrollable content area with custom scrollbar
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
@@ -123,17 +133,21 @@ class SecureServerWindow(QMainWindow):
                 background-color: transparent; 
             }
             QScrollBar:vertical {
-                background: #f0f4f8;
-                width: 12px;
-                border-radius: 6px;
+                background: #f0f6fa;
+                width: 14px;
+                border-radius: 7px;
+                margin: 2px;
             }
             QScrollBar::handle:vertical {
-                background: #c0d0e0;
-                border-radius: 6px;
-                min-height: 30px;
+                background: #b0c8d8;
+                border-radius: 7px;
+                min-height: 40px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #a0b8d0;
+                background: #90b0c8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
         """)
         
@@ -141,59 +155,65 @@ class SecureServerWindow(QMainWindow):
         self.scroll_content.setStyleSheet("background-color: transparent;")
         self.flows_layout = QVBoxLayout(self.scroll_content)
         self.flows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.flows_layout.setSpacing(8)
+        self.flows_layout.setSpacing(10)
         
         self.scroll_area.setWidget(self.scroll_content)
         canvas_layout.addWidget(self.scroll_area)
         
-        # Modern pagination controls
+        # Enhanced pagination controls matching mockup
         pagination_layout = QHBoxLayout()
-        pagination_layout.setContentsMargins(10, 15, 10, 0)
+        pagination_layout.setContentsMargins(12, 18, 12, 0)
         
         self.lbl_page = QLabel("Page 1 of 1 (Total: 0)")
         self.lbl_page.setStyleSheet("""
-            font-size: 10pt; 
-            color: #334155; 
+            font-size: 10.5pt; 
+            color: #2d3e50; 
             font-weight: 600;
+            letter-spacing: -0.3px;
         """)
         
-        # Center navigation buttons
+        # Center navigation buttons with refined styling
         center_nav_layout = QHBoxLayout()
-        center_nav_layout.setSpacing(10)
+        center_nav_layout.setSpacing(12)
         
         self.btn_prev = QPushButton("< Previous")
-        self.btn_prev.setFixedSize(110, 38)
+        self.btn_prev.setFixedSize(120, 40)
+        self.btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_prev.setStyleSheet("""
             QPushButton { 
                 font-size: 10pt; 
-                color: #94a3b8; 
+                color: #88a0b8; 
                 background-color: transparent; 
-                border: 2px solid #e0e8f0; 
-                border-radius: 19px;
+                border: 2px solid #d8e4f0; 
+                border-radius: 20px;
                 font-weight: 600; 
             }
             QPushButton:hover {
-                background-color: #f0f4f8;
-                color: #64748b;
+                background-color: #f0f6fa;
+                color: #5a7088;
+                border-color: #b8cce0;
             }
         """)
         self.btn_prev.clicked.connect(self._prev_page)
         self.btn_prev.setEnabled(False)
 
         self.btn_next = QPushButton("Next >")
-        self.btn_next.setFixedSize(110, 38)
+        self.btn_next.setFixedSize(120, 40)
+        self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_next.setStyleSheet("""
             QPushButton { 
                 font-size: 10pt; 
-                background-color: #a8d5e8; 
-                color: #1e3a5f; 
+                background-color: #9dc9e0; 
+                color: #0f2847; 
                 border: none;
-                border-radius: 19px; 
+                border-radius: 20px; 
                 font-weight: 600;
+                box-shadow: 0 2px 6px rgba(60, 120, 160, 0.15);
             } 
             QPushButton:hover { 
-                background-color: #8ec5de; 
-                color: #0f2847; 
+                background-color: #7db8d5; 
+                color: #081a2e; 
+                box-shadow: 0 3px 9px rgba(60, 120, 160, 0.22);
             }
         """)
         self.btn_next.clicked.connect(self._next_page)
@@ -204,9 +224,10 @@ class SecureServerWindow(QMainWindow):
 
         self.lbl_items = QLabel("10 items per page")
         self.lbl_items.setStyleSheet("""
-            font-size: 10pt; 
-            color: #334155; 
+            font-size: 10.5pt; 
+            color: #2d3e50; 
             font-weight: 600;
+            letter-spacing: -0.3px;
         """)
 
         pagination_layout.addWidget(self.lbl_page)
@@ -218,20 +239,22 @@ class SecureServerWindow(QMainWindow):
         canvas_layout.addLayout(pagination_layout)
         self.main_layout.addWidget(self.canvas_container)
         
-        # Subtle exit button
+        # Refined exit button
         bottom_layout = QHBoxLayout()
         bottom_layout.addStretch()
         self.btn_exit = QPushButton("Exit Fullscreen")
-        self.btn_exit.setFixedSize(150, 30)
+        self.btn_exit.setFixedSize(160, 32)
+        self.btn_exit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_exit.setStyleSheet("""
             QPushButton { 
                 background-color: transparent; 
-                color: #64748b; 
-                font-size: 9pt; 
+                color: #5a7088; 
+                font-size: 9.5pt; 
                 border: none; 
+                font-weight: 500;
             } 
             QPushButton:hover { 
-                color: #ef4444; 
+                color: #dc3545; 
                 text-decoration: underline;
             }
         """)
@@ -269,31 +292,32 @@ class SecureServerWindow(QMainWindow):
         # Update pagination info
         self.lbl_page.setText(f"Page {self.current_page + 1} of {total_pages} (Total: {total_items})")
         
-        # Update button states
+        # Update button states with refined styling
         self.btn_prev.setEnabled(self.current_page > 0)
         if self.current_page > 0:
             self.btn_prev.setStyleSheet("""
                 QPushButton { 
                     font-size: 10pt; 
-                    color: #1e3a5f; 
+                    color: #0f2847; 
                     background-color: transparent; 
-                    border: 2px solid #a8d5e8; 
-                    border-radius: 19px;
+                    border: 2px solid #9dc9e0; 
+                    border-radius: 20px;
                     font-weight: 600; 
                 }
                 QPushButton:hover {
                     background-color: #e8f4f8;
-                    color: #0f2847;
+                    color: #081a2e;
+                    border-color: #7db8d5;
                 }
             """)
         else:
             self.btn_prev.setStyleSheet("""
                 QPushButton { 
                     font-size: 10pt; 
-                    color: #94a3b8; 
+                    color: #88a0b8; 
                     background-color: transparent; 
-                    border: 2px solid #e0e8f0; 
-                    border-radius: 19px;
+                    border: 2px solid #d8e4f0; 
+                    border-radius: 20px;
                     font-weight: 600; 
                 }
             """)
@@ -303,25 +327,27 @@ class SecureServerWindow(QMainWindow):
             self.btn_next.setStyleSheet("""
                 QPushButton { 
                     font-size: 10pt; 
-                    background-color: #a8d5e8; 
-                    color: #1e3a5f; 
+                    background-color: #9dc9e0; 
+                    color: #0f2847; 
                     border: none;
-                    border-radius: 19px; 
+                    border-radius: 20px; 
                     font-weight: 600;
+                    box-shadow: 0 2px 6px rgba(60, 120, 160, 0.15);
                 } 
                 QPushButton:hover { 
-                    background-color: #8ec5de; 
-                    color: #0f2847; 
+                    background-color: #7db8d5; 
+                    color: #081a2e; 
+                    box-shadow: 0 3px 9px rgba(60, 120, 160, 0.22);
                 }
             """)
         else:
             self.btn_next.setStyleSheet("""
                 QPushButton { 
                     font-size: 10pt; 
-                    background-color: #e0e8f0; 
-                    color: #94a3b8; 
+                    background-color: #d8e4f0; 
+                    color: #88a0b8; 
                     border: none;
-                    border-radius: 19px; 
+                    border-radius: 20px; 
                     font-weight: 600;
                 }
             """)
@@ -335,9 +361,9 @@ class SecureServerWindow(QMainWindow):
         self._render_page()
 
     def _spawn_browser_modal_with_blur(self) -> None:
-        # Add blur effect to background
+        # Enhanced blur effect
         blur_effect = QGraphicsBlurEffect()
-        blur_effect.setBlurRadius(20)
+        blur_effect.setBlurRadius(25)
         self.canvas_container.setGraphicsEffect(blur_effect)
 
         dialog = BrowserModalDialog(self)
@@ -350,7 +376,7 @@ class SecureServerWindow(QMainWindow):
     def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str) -> None:
         try:
             blur_effect = QGraphicsBlurEffect()
-            blur_effect.setBlurRadius(20)
+            blur_effect.setBlurRadius(25)
             self.canvas_container.setGraphicsEffect(blur_effect)
 
             dialog = MediaCategoryDialog(self)
