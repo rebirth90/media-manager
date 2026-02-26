@@ -483,7 +483,7 @@ class SecureServerWindow(QMainWindow):
 
         current_url = self.web_view.url().toString()
         if "login.php" in current_url:
-            self.log_console("Automating Filelist Security Challenge...")
+            self.log_console("Executing automated login. 'Login on any IP' checkbox targeted.")
 
             user = os.getenv("FILELIST_USER", "")
             password = os.getenv("FILELIST_PASS", "")
@@ -509,6 +509,9 @@ class SecureServerWindow(QMainWindow):
                 }})();
             """
             self.web_view.page().runJavaScript(js_code)
+        elif "browse.php" not in current_url:
+            self.log_console("Authentication complete. Navigating to Torrent Browser.")
+            self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
 
     def _on_download_state_changed(self, state: QWebEngineDownloadRequest.DownloadState, request: QWebEngineDownloadRequest) -> None:
         """Tracks the lifecycle of the torrent file arriving on disk."""
