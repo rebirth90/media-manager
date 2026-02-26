@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QProgressBar, QPushButton,
     QRadioButton, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout,
-    QWidget, QHeaderView
+    QWidget, QHeaderView, QFrame, QSizePolicy
 )
 
 # Strictly load environment variables at the top level
@@ -298,114 +298,198 @@ class SecureServerWindow(QMainWindow):
         # Tracking active pipeline strings
         self.current_qbit_hashes: List[str] = []
 
+        self.setStyleSheet("""
+            QMainWindow { background-color: #1a1c23; }
+            QLabel { color: #ffffff; }
+            QFrame { background-color: #2b2b36; border-radius: 10px; border: 1px solid #3f3f4e; }
+            QLineEdit { background-color: #1a1c23; color: white; border: 1px solid #3f3f4e; border-radius: 5px; padding: 5px; }
+            QPushButton { background-color: #3f3f4e; color: white; border: none; border-radius: 5px; padding: 10px; font-weight: bold; }
+            QPushButton:hover { background-color: #4f4f6e; }
+            QPushButton#ActionBtn { background-color: #444455; }
+            QPushButton#ActionBtn:hover { background-color: #555566; }
+            QProgressBar { border: none; background-color: #3f3f4e; border-radius: 5px; text-align: center; color: transparent; height: 10px; }
+            QProgressBar::chunk { background-color: #3498db; border-radius: 5px; }
+            QTextEdit { background-color: #1a1c23; color: #a0a0a0; border: none; font-family: monospace; font-size: 8pt; }
+            /* Arrow indicators between cards */
+            QLabel#Arrow { color: #3498db; font-size: 30pt; font-weight: bold; }
+        """)
+
         central_widget = QWidget()
         self.main_layout = QVBoxLayout(central_widget)
+        self.main_layout.setContentsMargins(40, 40, 40, 40)
+        self.main_layout.setSpacing(30)
 
-        # Status Label Implementation
-        env_mode = os.getenv("APP_ENV", "development")
-        self.status_label = QLabel(
-            f"Mode: {env_mode.upper()}\n"
-            f"Backend Status: Running\n"
-            f"Location: {host}:{port}\n"
-            f"Active Torrent Target: None"
-        )
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #f39c12;")
-        self.main_layout.addWidget(self.status_label)
+        # Dashboard Title
+        self.title_label = QLabel("MediaFlow Automator Dashboard")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setStyleSheet("font-size: 24pt; font-weight: bold; border: none; background: transparent;")
+        self.main_layout.addWidget(self.title_label)
 
-        # Progress Bars Layer
-        progress_layout = QHBoxLayout()
+        # Horizontal Cards Dashboard Layout
+        dashboard_layout = QHBoxLayout()
+        dashboard_layout.setSpacing(20)
+
+        # --- Card 1: Pickup ---
+        self.card1 = QFrame()
+        self.card1.setFixedSize(280, 250)
+        card1_layout = QVBoxLayout(self.card1)
+        card1_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        icon1 = QLabel("🔍") # Placeholder icon
+        icon1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon1.setStyleSheet("font-size: 40pt; border: none; background: transparent; margin-top: 10px;")
+        card1_layout.addWidget(icon1)
+
+        title1 = QLabel("1. Movie / TV Series Pickup")
+        title1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title1.setStyleSheet("font-size: 12pt; font-weight: bold; border: none; background: transparent; margin-bottom: 10px;")
+        card1_layout.addWidget(title1)
+
+        search_layout = QHBoxLayout()
+        search_lbl = QLabel("Search:")
+        search_lbl.setStyleSheet("border: none; background: transparent;")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Gladiator II")
+        search_layout.addWidget(search_lbl)
+        search_layout.addWidget(self.search_input)
+        card1_layout.addLayout(search_layout)
+
+        self.btn_queue = QPushButton("Add to Queue")
+        self.btn_queue.setObjectName("ActionBtn")
+        self.btn_queue.clicked.connect(self._add_to_queue_flow)
+        card1_layout.addWidget(self.btn_queue)
+        
+        dashboard_layout.addWidget(self.card1)
+
+        # Arrow
+        arrow1 = QLabel("▶")
+        arrow1.setObjectName("Arrow")
+        arrow1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dashboard_layout.addWidget(arrow1)
+
+        # --- Card 2: Download ---
+        self.card2 = QFrame()
+        self.card2.setFixedSize(280, 250)
+        card2_layout = QVBoxLayout(self.card2)
+        card2_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        icon2 = QLabel("☁") # Placeholder icon
+        icon2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon2.setStyleSheet("font-size: 40pt; border: none; background: transparent; margin-top: 10px;")
+        card2_layout.addWidget(icon2)
+
+        title2 = QLabel("2. Torrent Download")
+        title2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title2.setStyleSheet("font-size: 12pt; font-weight: bold; border: none; background: transparent; margin-bottom: 15px;")
+        card2_layout.addWidget(title2)
+        
+        self.dl_status_lbl = QLabel("Waiting...")
+        self.dl_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dl_status_lbl.setStyleSheet("font-size: 10pt; border: none; background: transparent;")
+        card2_layout.addWidget(self.dl_status_lbl)
+
+        self.dl_speed_lbl = QLabel("0% (0 MB/s)")
+        self.dl_speed_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dl_speed_lbl.setStyleSheet("font-size: 10pt; color: #a0a0a0; border: none; background: transparent; margin-bottom: 5px;")
+        card2_layout.addWidget(self.dl_speed_lbl)
+
         self.qbit_progress = QProgressBar()
         self.qbit_progress.setRange(0, 100)
-        self.qbit_progress.setFormat("Download: %p%")
-        progress_layout.addWidget(self.qbit_progress)
+        self.qbit_progress.setFixedHeight(12)
+        card2_layout.addWidget(self.qbit_progress)
+
+        dashboard_layout.addWidget(self.card2)
+
+        # Arrow
+        arrow2 = QLabel("▶")
+        arrow2.setObjectName("Arrow")
+        arrow2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dashboard_layout.addWidget(arrow2)
+
+        # --- Card 3: Conversion ---
+        self.card3 = QFrame()
+        self.card3.setFixedSize(280, 250)
+        card3_layout = QVBoxLayout(self.card3)
+        card3_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        icon3 = QLabel("🎞") # Placeholder icon
+        icon3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon3.setStyleSheet("font-size: 40pt; border: none; background: transparent; margin-top: 10px;")
+        card3_layout.addWidget(icon3)
+
+        title3 = QLabel("3. Movie is Converting")
+        title3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title3.setStyleSheet("font-size: 12pt; font-weight: bold; border: none; background: transparent; margin-bottom: 5px;")
+        card3_layout.addWidget(title3)
+
+        self.conv_status_lbl = QLabel("Pending...")
+        self.conv_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.conv_status_lbl.setStyleSheet("font-size: 10pt; border: none; background: transparent;")
+        card3_layout.addWidget(self.conv_status_lbl)
 
         self.conv_progress = QProgressBar()
         self.conv_progress.setRange(0, 100)
-        self.conv_progress.setFormat("Conversion: %p%")
-        progress_layout.addWidget(self.conv_progress)
+        self.conv_progress.setFixedHeight(12)
+        card3_layout.addWidget(self.conv_progress)
 
-        self.main_layout.addLayout(progress_layout)
-
-        # Actions Panel Implementation
-        action_layout = QHBoxLayout()
-
-        self.btn_web = QPushButton("1. Open Filelist Browser")
-        self.btn_qbit = QPushButton("2. Push to qBittorrent Engine")
-        self.btn_ssh = QPushButton("3. SSH Telemetry Pull")
-        self.btn_ssh.setCheckable(True)
-        self.btn_exit = QPushButton("Exit Fullscreen")
-
-        # Layout integration
-        action_layout.addWidget(self.btn_web)
-        action_layout.addWidget(self.btn_qbit)
-        action_layout.addWidget(self.btn_ssh)
-        action_layout.addWidget(self.btn_exit)
-        self.main_layout.addLayout(action_layout)
-
-        # Explicit Event Hook Mappings
-        self.btn_web.clicked.connect(self._toggle_browser)
-        self.btn_qbit.clicked.connect(self._push_to_qbit)
-        self.btn_ssh.clicked.connect(self._toggle_ssh_telemetry)
-        self.btn_exit.clicked.connect(self.close)
-
-        # Live Tail Polling Hook
-        self.ssh_timer = QTimer(self)
-        self.ssh_timer.timeout.connect(self._pull_ssh)
-        self.ssh_timer.setInterval(3000)
-
-        # Structural Split
-        split_layout = QVBoxLayout()
-
-        # Telemetry Panels Layer
-        telemetry_layout = QHBoxLayout()
-
-        # Database Queue
-        self.db_table = QTableWidget(0, 3)
-        self.db_table.setHorizontalHeaderLabels(["ID", "Status", "Path"])
-        self.db_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.db_table.setStyleSheet("background-color: #2b2b2b; color: #ffffff;")
-        db_group = QGroupBox("Live Database Queue")
-        db_layout = QVBoxLayout()
-        db_layout.addWidget(self.db_table)
-        db_group.setLayout(db_layout)
-        telemetry_layout.addWidget(db_group, stretch=1)
-
-        # General App Log
-        self.gen_log = QTextEdit()
-        self.gen_log.setReadOnly(True)
-        self.gen_log.setStyleSheet("background-color: #1e1e1e; color: #00ff00; font-family: monospace; font-size: 9pt;")
-        gen_group = QGroupBox("General App Log")
-        gen_layout = QVBoxLayout()
-        gen_layout.addWidget(self.gen_log)
-        gen_group.setLayout(gen_layout)
-        telemetry_layout.addWidget(gen_group, stretch=1)
-
-        # FFmpeg Encode Log
         self.ffmpeg_log = QTextEdit()
         self.ffmpeg_log.setReadOnly(True)
-        self.ffmpeg_log.setStyleSheet("background-color: #1e1e1e; color: #f39c12; font-family: monospace; font-size: 9pt;")
-        ffmpeg_group = QGroupBox("FFmpeg Encode Log")
-        ffmpeg_layout = QVBoxLayout()
-        ffmpeg_layout.addWidget(self.ffmpeg_log)
-        ffmpeg_group.setLayout(ffmpeg_layout)
-        telemetry_layout.addWidget(ffmpeg_group, stretch=1)
+        self.ffmpeg_log.setFixedHeight(70)
+        card3_layout.addWidget(self.ffmpeg_log)
 
-        split_layout.addLayout(telemetry_layout, stretch=2)
+        dashboard_layout.addWidget(self.card3)
 
-        # Torrent Data Dashboard UI (polling sink)
-        self.torrent_table = QTableWidget(0, 4)
-        self.torrent_table.setHorizontalHeaderLabels(["Name", "Size", "Progress", "State"])
-        self.torrent_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.torrent_table.setStyleSheet("background-color: #2b2b2b; color: #ffffff;")
-        split_layout.addWidget(self.torrent_table, stretch=1)
+        # Arrow
+        arrow3 = QLabel("▶")
+        arrow3.setObjectName("Arrow")
+        arrow3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dashboard_layout.addWidget(arrow3)
 
-        self.main_layout.addLayout(split_layout)
+        # --- Card 4: Finished ---
+        self.card4 = QFrame()
+        self.card4.setFixedSize(280, 250)
+        card4_layout = QVBoxLayout(self.card4)
+        card4_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Central Viewport Element
+        icon4 = QLabel("✔") # Placeholder icon
+        icon4.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon4.setStyleSheet("font-size: 40pt; border: none; background: transparent; margin-top: 10px;")
+        card4_layout.addWidget(icon4)
+
+        title4 = QLabel("4. Conversion Finished")
+        title4.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title4.setStyleSheet("font-size: 12pt; font-weight: bold; border: none; background: transparent; margin-bottom: 15px;")
+        card4_layout.addWidget(title4)
+
+        self.done_status_lbl = QLabel("Status: Waiting for pipeline...")
+        self.done_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.done_status_lbl.setWordWrap(True)
+        self.done_status_lbl.setStyleSheet("font-size: 10pt; border: none; background: transparent; margin-bottom: 10px;")
+        card4_layout.addWidget(self.done_status_lbl)
+
+        self.btn_open_folder = QPushButton("Open Folder")
+        self.btn_open_folder.setObjectName("ActionBtn")
+        self.btn_open_folder.setEnabled(False)
+        self.btn_open_folder.clicked.connect(self._open_finished_folder)
+        card4_layout.addWidget(self.btn_open_folder)
+
+        dashboard_layout.addWidget(self.card4)
+
+        self.main_layout.addLayout(dashboard_layout)
+
+        # Developer Escape / Exit button (Bottom Right)
+        bottom_layout = QHBoxLayout()
+        bottom_layout.addStretch()
+        self.btn_exit = QPushButton("Exit Fullscreen")
+        self.btn_exit.setFixedSize(150, 40)
+        self.btn_exit.clicked.connect(self.close)
+        bottom_layout.addWidget(self.btn_exit)
+        self.main_layout.addLayout(bottom_layout)
+
+        # Hidden Viewport / Browser
         self.web_view = QWebEngineView()
         self.web_view.hide()
-        self.main_layout.addWidget(self.web_view, stretch=1)
+        self.main_layout.addWidget(self.web_view)
 
         # Chromium Pipeline Interception Slot
         profile = self.web_view.page().profile()
@@ -427,40 +511,47 @@ class SecureServerWindow(QMainWindow):
         self.poll_worker.start()
 
     def _update_torrent_table(self, data_payload: List[Any]) -> None:
-        """Securely executes back on Qt MainThread strictly processing UI layout mutations."""
+        """Updates Card 2 with download progress."""
         target_torrents, all_hashes_in_background = data_payload
-        
-        # Maintain background hash state for `set_pre_add_state` tracking
         self.current_qbit_hashes = all_hashes_in_background
         
-        self.torrent_table.setRowCount(len(target_torrents))
-        for row, t in enumerate(target_torrents):
+        if target_torrents:
+            t = target_torrents[0]
             name = t.get('name', 'Unknown')
-            size = f"{t.get('size', 0) / (1024**2):.2f} MB"
-            prog = f"{t.get('progress', 0) * 100:.1f}%"
+            prog_val = t.get('progress', 0)
+            dlspeed = t.get('dlspeed', 0) / (1024**2) # MB/s
             state = t.get('state', 'Unknown')
 
-            self.torrent_table.setItem(row, 0, QTableWidgetItem(name))
-            self.torrent_table.setItem(row, 1, QTableWidgetItem(size))
-            self.torrent_table.setItem(row, 2, QTableWidgetItem(prog))
-            self.torrent_table.setItem(row, 3, QTableWidgetItem(state))
+            self.dl_status_lbl.setText(f"Downloading: {name[:20]}...")
+            self.dl_speed_lbl.setText(f"{int(prog_val * 100)}% ({dlspeed:.1f} MB/s)")
+            
+            # Auto-trigger card 3 when complete
+            if prog_val == 1.0 or state in ['uploading', 'stalledUP', 'pausedUP', 'completed']:
+                 self.conv_status_lbl.setText("Encoding: 0% (Intel QSV)")
+                 # Start SSH dummy poll
+                 if not hasattr(self, 'ssh_timer'):
+                     self.ssh_timer = QTimer(self)
+                     self.ssh_timer.timeout.connect(self._pull_ssh)
+                     self.ssh_timer.setInterval(3000)
+                 self.ssh_timer.start()
 
     def _on_torrent_target_complete(self) -> None:
-        """Fires safely in MainThread when daemon target states completion logic bounds are hit."""
-        self.log_console("Target Tracking Alert: Upload/Download pipeline marked COMPLETED.")
-        self.btn_qbit.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        self.btn_qbit.setText("2. ✔ Push Complete")
+        pass
 
     def log_console(self, text: str) -> None:
-        """Appends output securely to the read-only dashboard console."""
-        if hasattr(self, 'gen_log'):
-            self.gen_log.append(f"> {text}")
+        """Console logging mapped to print since UI logs were removed."""
+        print(f"Log: {text}")
 
-    def _toggle_browser(self) -> None:
+    def _add_to_queue_flow(self) -> None:
+        """Card 1 interaction point. Opens browser to Filelist."""
+        query = self.search_input.text().strip()
+        search_url = f"https://filelist.io/browse.php?search={query}&cat=0&searchin=1&sort=2" if query else "https://filelist.io/login.php"
+        
         if self.web_view.isHidden():
             self.web_view.show()
-            self.web_view.setUrl(QUrl("https://filelist.io/login.php"))
-            self.log_console("Engine instantiated for Automated Login Sequence.")
+            # Overlay browser on top
+            self.web_view.raise_()
+            self.web_view.setUrl(QUrl(search_url))
         else:
             self.web_view.hide()
 
@@ -533,18 +624,9 @@ class SecureServerWindow(QMainWindow):
                 with open(file_path, "rb") as f:
                     self.torrent_bytes = f.read()
 
-                # Success Mutation
-                self.btn_web.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-                self.btn_web.setText("1. ✔ Torrent Assigned")
-
-                # State Overlay Shift
-                env_mode = os.getenv("APP_ENV", "development")
-                self.status_label.setText(
-                    f"Mode: {env_mode.upper()}\n"
-                    f"Backend Status: Running\n"
-                    f"Location: {os.getenv('SERVER_HOST')}:{os.getenv('LOCAL_PORT')}\n"
-                    f"Active Torrent Target: {self.relative_path}"
-                )
+                # Card 1 Success Style
+                self.btn_queue.setText("✔ Added")
+                self.btn_queue.setStyleSheet("background-color: #27ae60; color: white;")
                 self._push_to_qbit()
             else:
                 self.log_console("User aborted categorization flow. Torrent cache in volatile state voided.")
@@ -601,27 +683,33 @@ class SecureServerWindow(QMainWindow):
         self.ssh_worker.start()
 
     def _update_telemetry_ui(self, db_out: str, gen_out: str, ff_out: str, prog: int) -> None:
-        """Updates GUI from thread-safe signals."""
+        """Updates Card 3 and 4 UI elements from thread-safe signals."""
         self.conv_progress.setValue(prog)
-        if hasattr(self, 'gen_log'):
-            self.gen_log.setText(gen_out)
-            self.ffmpeg_log.setText(ff_out)
+        self.conv_status_lbl.setText(f"Encoding: {prog}% (Intel QSV)")
+        self.ffmpeg_log.setText(ff_out)
         
-        # Parse DB output
-        lines = db_out.split('\n')
-        # We skip the first 2 lines (header and dashes)
-        if len(lines) > 2:
-            data_lines = lines[2:]
-            self.db_table.setRowCount(len(data_lines))
-            for row, line in enumerate(data_lines):
-                parts = re.split(r'\s{2,}', line.strip())
-                if len(parts) < 3:
-                     parts = line.split(maxsplit=2)
-                for col, part in enumerate(parts[:3]):
-                    if part:
-                        self.db_table.setItem(row, col, QTableWidgetItem(part))
-        else:
-            self.db_table.setRowCount(0)
+        # Parse DB output to find if our conversion finished
+        # Dummy check: if progress is >= 100, we mark as finished
+        if prog >= 100:
+            self._set_finished_state()
+            if hasattr(self, 'ssh_timer'):
+                self.ssh_timer.stop()
+                
+    def _set_finished_state(self) -> None:
+        """Transforms Card 4 into finished state."""
+        self.card4.setStyleSheet("background-color: #27ae60; border: 1px solid #2ecc71; box-shadow: 0 0 15px rgba(46, 204, 113, 0.5);")
+        # Target Path
+        base_path = os.getenv("BASE_SCRATCH_PATH", "/mnt/media")
+        display_path = f"{base_path}/{self.relative_path}" if self.relative_path else f"{base_path}/Completed/"
+        
+        self.done_status_lbl.setText(f"Status: Complete. Archived to\n{display_path}")
+        self.btn_open_folder.setEnabled(True)
+        self.btn_open_folder.setStyleSheet("background-color: #4e4e5e; color: white; border-radius: 5px; padding: 10px; font-weight: bold;")
+        
+    def _open_finished_folder(self) -> None:
+        """Simulates opening finished folder natively."""
+        self.log_console("User requested to open folder.")
+        # E.g. os.startfile(os.path.normpath(base_path)) or similar in real code
 
     def closeEvent(self, event) -> None:
         """Overrides generic exit to dismantle active background pooling loops correctly."""
