@@ -37,22 +37,22 @@ class MediaFlowWidget(QFrame):
                 background-color: transparent;
             }
         """)
-        self.setFixedHeight(120)
+        self.setFixedHeight(64)
 
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(15, 15, 15, 15)
-        self.main_layout.setSpacing(20)
+        self.main_layout.setContentsMargins(10, 6, 10, 6)
+        self.main_layout.setSpacing(12)
 
         # Left Section
         self.title_lbl = QLabel(self.title)
         self.title_lbl.setStyleSheet("""
-            font-size: 16pt; 
+            font-size: 12pt; 
             font-weight: 800;
             color: #0f172a;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.2px;
         """)
-        self.title_lbl.setWordWrap(True)
-        self.main_layout.addWidget(self.title_lbl, stretch=2)
+        self.title_lbl.setWordWrap(False)
+        self.main_layout.addWidget(self.title_lbl, stretch=6)
 
         div1 = QFrame()
         div1.setFrameShape(QFrame.Shape.VLine)
@@ -60,32 +60,32 @@ class MediaFlowWidget(QFrame):
         div1.setFixedWidth(2)
         self.main_layout.addWidget(div1)
 
-        # Middle Section
-        self.grid_layout = QGridLayout()
-        self.grid_layout.setHorizontalSpacing(30)
-        self.grid_layout.setVerticalSpacing(2)
+        # Middle Section (Flattened)
+        self.mid_layout = QHBoxLayout()
+        self.mid_layout.setSpacing(8)
 
-        lbl_style_top = "font-size: 9pt; color: #64748b;"
-        lbl_style_bot = "font-size: 11pt; font-weight: bold; color: #0f172a;"
+        lbl_style_cap = "font-size: 8pt; color: #64748b; font-weight: normal;"
+        lbl_style_val = "font-size: 9pt; font-weight: bold; color: #0f172a;"
 
         self.lbl_state_cap = QLabel("State:")
-        self.lbl_state_cap.setStyleSheet(lbl_style_top)
+        self.lbl_state_cap.setStyleSheet(lbl_style_cap)
         self.lbl_state_val = QLabel("Initializing")
-        self.lbl_state_val.setStyleSheet(lbl_style_bot)
+        self.lbl_state_val.setStyleSheet(lbl_style_val)
         
         self.lbl_size_cap = QLabel("Size:")
-        self.lbl_size_cap.setStyleSheet(lbl_style_top)
+        self.lbl_size_cap.setStyleSheet(lbl_style_cap)
         self.lbl_size_val = QLabel("0 B")
-        self.lbl_size_val.setStyleSheet(lbl_style_bot)
+        self.lbl_size_val.setStyleSheet(lbl_style_val)
 
-        self.lbl_prog_cap = QLabel("Progress")
-        self.lbl_prog_cap.setStyleSheet(lbl_style_top)
+        self.lbl_prog_cap = QLabel("Progress:")
+        self.lbl_prog_cap.setStyleSheet(lbl_style_cap)
         
         self.prog_bar_dl = QProgressBar()
         self.prog_bar_dl.setRange(0, 100)
         self.prog_bar_dl.setValue(0)
         self.prog_bar_dl.setTextVisible(True)
         self.prog_bar_dl.setFormat("%p %")
+        self.prog_bar_dl.setFixedWidth(70)
         self.prog_bar_dl.setStyleSheet("""
             QProgressBar {
                 background-color: #1e293b;
@@ -94,30 +94,40 @@ class MediaFlowWidget(QFrame):
                 text-align: center;
                 color: #ffffff;
                 font-weight: bold;
-                font-size: 8pt;
+                font-size: 7pt;
             }
             QProgressBar::chunk {
                 background-color: #4ade80;
                 border-radius: 3px;
             }
         """)
-        self.prog_bar_dl.setFixedHeight(18)
+        self.prog_bar_dl.setFixedHeight(15)
 
-        self.lbl_speed_cap = QLabel("DL Speed:")
-        self.lbl_speed_cap.setStyleSheet(lbl_style_top)
+        self.lbl_speed_cap = QLabel("Speed:")
+        self.lbl_speed_cap.setStyleSheet(lbl_style_cap)
         self.lbl_speed_val = QLabel("0 kB/s")
-        self.lbl_speed_val.setStyleSheet(lbl_style_bot)
+        self.lbl_speed_val.setStyleSheet(lbl_style_val)
 
-        self.grid_layout.addWidget(self.lbl_state_cap, 0, 0)
-        self.grid_layout.addWidget(self.lbl_state_val, 1, 0)
-        self.grid_layout.addWidget(self.lbl_size_cap, 0, 1)
-        self.grid_layout.addWidget(self.lbl_size_val, 1, 1)
-        self.grid_layout.addWidget(self.lbl_prog_cap, 2, 0)
-        self.grid_layout.addWidget(self.prog_bar_dl, 3, 0)
-        self.grid_layout.addWidget(self.lbl_speed_cap, 2, 1)
-        self.grid_layout.addWidget(self.lbl_speed_val, 3, 1)
+        def _add_mid_div():
+            d = QFrame()
+            d.setFrameShape(QFrame.Shape.VLine)
+            d.setStyleSheet("border: 1px dashed #cbd5e1; margin: 0 4px;")
+            self.mid_layout.addWidget(d)
 
-        self.main_layout.addLayout(self.grid_layout, stretch=2)
+        self.mid_layout.addWidget(self.lbl_state_cap)
+        self.mid_layout.addWidget(self.lbl_state_val)
+        _add_mid_div()
+        self.mid_layout.addWidget(self.lbl_size_cap)
+        self.mid_layout.addWidget(self.lbl_size_val)
+        _add_mid_div()
+        self.mid_layout.addWidget(self.lbl_prog_cap)
+        self.mid_layout.addWidget(self.prog_bar_dl)
+        _add_mid_div()
+        self.mid_layout.addWidget(self.lbl_speed_cap)
+        self.mid_layout.addWidget(self.lbl_speed_val)
+        self.mid_layout.addStretch()
+
+        self.main_layout.addLayout(self.mid_layout, stretch=3)
 
         div2 = QFrame()
         div2.setFrameShape(QFrame.Shape.VLine)
@@ -125,23 +135,19 @@ class MediaFlowWidget(QFrame):
         div2.setFixedWidth(2)
         self.main_layout.addWidget(div2)
 
-        # Right Section
-        self.conv_grid = QGridLayout()
-        self.conv_grid.setVerticalSpacing(2)
+        # Right Section (Flattened)
+        self.conv_layout = QHBoxLayout()
+        self.conv_layout.setSpacing(12)
         
-        self.lbl_conv_state_cap = QLabel("State:")
-        self.lbl_conv_state_cap.setStyleSheet(lbl_style_top)
         self.lbl_conv_state_val = QLabel("Not Started")
-        self.lbl_conv_state_val.setStyleSheet(lbl_style_bot)
-        
-        self.lbl_conv_prog_cap = QLabel("Progress")
-        self.lbl_conv_prog_cap.setStyleSheet(lbl_style_top)
+        self.lbl_conv_state_val.setStyleSheet(lbl_style_val)
         
         self.prog_bar_conv = QProgressBar()
         self.prog_bar_conv.setRange(0, 100)
         self.prog_bar_conv.setValue(0)
         self.prog_bar_conv.setTextVisible(True)
         self.prog_bar_conv.setFormat("%p %")
+        self.prog_bar_conv.setMaximumWidth(120)
         self.prog_bar_conv.setStyleSheet("""
             QProgressBar {
                 background-color: #f1f5f9;
@@ -150,21 +156,20 @@ class MediaFlowWidget(QFrame):
                 text-align: center;
                 color: #0f172a;
                 font-weight: bold;
-                font-size: 8pt;
+                font-size: 7pt;
             }
             QProgressBar::chunk {
                 background-color: #4ade80;
                 border-radius: 3px;
             }
         """)
-        self.prog_bar_conv.setFixedHeight(18)
+        self.prog_bar_conv.setFixedHeight(15)
         
-        self.conv_grid.addWidget(self.lbl_conv_state_cap, 0, 0)
-        self.conv_grid.addWidget(self.lbl_conv_state_val, 1, 0)
-        self.conv_grid.addWidget(self.lbl_conv_prog_cap, 2, 0)
-        self.conv_grid.addWidget(self.prog_bar_conv, 3, 0)
+        self.conv_layout.addWidget(self.lbl_conv_state_val)
+        self.conv_layout.addWidget(self.prog_bar_conv)
+        self.conv_layout.addStretch()
         
-        self.main_layout.addLayout(self.conv_grid, stretch=1)
+        self.main_layout.addLayout(self.conv_layout, stretch=2)
 
         # Overlay click button
         self.overlay_btn = QPushButton(self)

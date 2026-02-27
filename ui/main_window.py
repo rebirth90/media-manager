@@ -13,7 +13,7 @@ class SecureServerWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Media Manager - Enterprise Dashboard")
-        self.showFullScreen()
+        self.showMaximized()
         
         # Refined gradient background inspired by mockup - softer, more professional
         self.setStyleSheet("""
@@ -84,29 +84,9 @@ class SecureServerWindow(QMainWindow):
             }
         """)
         
-        # Bell notification button with refined styling
-        self.btn_notif = QPushButton("🔔")
-        self.btn_notif.setFixedSize(48, 48)
-        self.btn_notif.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_notif.setStyleSheet("""
-            QPushButton { 
-                background-color: #ffffff; 
-                border: 2px solid #c8d8e8; 
-                border-radius: 24px; 
-                font-size: 17pt;
-            } 
-            QPushButton:hover { 
-                background-color: #f0f8ff; 
-                border-color: #7db8d5;
-                box-shadow: 0 2px 8px rgba(60, 120, 160, 0.12);
-            }
-        """)
-        
         nav_layout.addWidget(self.btn_add_torrent)
         nav_layout.addStretch()
         nav_layout.addWidget(self.search_bar)
-        nav_layout.addSpacing(12)
-        nav_layout.addWidget(self.btn_notif)
         
         self.main_layout.addLayout(nav_layout)
 
@@ -239,29 +219,8 @@ class SecureServerWindow(QMainWindow):
         canvas_layout.addLayout(pagination_layout)
         self.main_layout.addWidget(self.canvas_container)
         
-        # Refined exit button
-        bottom_layout = QHBoxLayout()
-        bottom_layout.addStretch()
-        self.btn_exit = QPushButton("Exit Fullscreen")
-        self.btn_exit.setFixedSize(160, 32)
-        self.btn_exit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_exit.setStyleSheet("""
-            QPushButton { 
-                background-color: transparent; 
-                color: #5a7088; 
-                font-size: 9.5pt; 
-                border: none; 
-                font-weight: 500;
-            } 
-            QPushButton:hover { 
-                color: #dc3545; 
-                text-decoration: underline;
-            }
-        """)
-        self.btn_exit.clicked.connect(self.close)
-        bottom_layout.addWidget(self.btn_exit)
-        self.main_layout.addLayout(bottom_layout)
-
+        # Removed exit fullscreen button
+        
         self.setCentralWidget(self.central_w)
         
         self.all_flows: List[MediaFlowWidget] = []

@@ -32,7 +32,7 @@ def main() -> None:
     qt_app.setFont(font)
 
     main_window = SecureServerWindow()
-    main_window.showFullScreen()
+    main_window.show()
     
     sys.exit(qt_app.exec())
 
