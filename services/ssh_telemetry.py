@@ -7,21 +7,38 @@ class SSHTelemetryClient(QThread):
     telemetry_data = pyqtSignal(str, str, str, int)
     error = pyqtSignal(str)
 
+    def __init__(self, target_title: str, parent=None) -> None:
+        super().__init__(parent)
+        self.target_title = target_title
+        self.safe_title = re.sub(r'[\\/*?:"<>| \']', "_", self.target_title)
+
     def run(self) -> None:
         host = os.getenv("SSH_HOST", "127.0.0.1")
         user = os.getenv("SSH_USER", "root")
         password = os.getenv("SSH_PASS", "toor")
         remote_app_dir = os.getenv("REMOTE_APP_DIR", "/opt/movie-conversion")
+        
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(hostname=host, username=user, password=password, timeout=5.0)
-            db_out = self._exec_cmd(client, f'sqlite3 {remote_app_dir}/conversion_data.db -header -column "SELECT id, status, path FROM jobs;"')
-            gen_out = self._exec_cmd(client, 'tail -n 15 /var/log/conversion/app.log')
-            ff_out = self._exec_cmd(client, 'LATEST_LOG=$(ls -t /var/log/conversion/ffmpeg/*.log 2>/dev/null | head -n 1); if [ -n "$LATEST_LOG" ]; then tail -n 15 "$LATEST_LOG"; else echo "No active logs found."; fi')
+
+            sql_title = self.target_title.replace("'", "''")
+            db_cmd = f'sqlite3 {remote_app_dir}/conversion_data.db -column "SELECT status FROM jobs WHERE path LIKE \'%{sql_title}%\' ORDER BY id DESC LIMIT 1;"'
+            db_status = self._exec_cmd(client, db_cmd) or "WAITING IN QUEUE"
+
+            gen_cmd = f'LOG=$(ls -t /var/log/conversion/general/*{self.safe_title}*.log 2>/dev/null | head -n 1); if [ -n "$LOG" ]; then cat "$LOG"; else echo "Pending..."; fi'
+            full_gen_log = self._exec_cmd(client, gen_cmd)
+
+            ff_cmd = f'LOG=$(ls -t /var/log/conversion/ffmpeg/*{self.safe_title}*.log 2>/dev/null | head -n 1); if [ -n "$LOG" ]; then tail -n 50 "$LOG"; else echo "Pending..."; fi'
+            ff_tail = self._exec_cmd(client, ff_cmd)
+            
+            ff_full_cmd = f'LOG=$(ls -t /var/log/conversion/ffmpeg/*{self.safe_title}*.log 2>/dev/null | head -n 1); if [ -n "$LOG" ]; then cat "$LOG"; fi'
+            ff_full_log = self._exec_cmd(client, ff_full_cmd)
+            prog = self._calculate_conversion_progress(ff_full_log)
+
             client.close()
-            prog = self._calculate_conversion_progress(ff_out)
-            self.telemetry_data.emit(db_out, gen_out, ff_out, prog)
+            self.telemetry_data.emit(db_status, full_gen_log, ff_tail, prog)
         except Exception as e:
             self.error.emit(f"SSH Telemetry Failed: {str(e)}")
 
@@ -31,10 +48,23 @@ class SSHTelemetryClient(QThread):
         return output if output else "No data found."
 
     def _calculate_conversion_progress(self, ff_log: str) -> int:
-        matches = re.findall(r"time=(\d{2}):(\d{2}):(\d{2})", ff_log)
-        if not matches:
+        if not ff_log or ff_log == "No data found.": 
             return 0
-        h, m, s = matches[-1]
-        total_seconds = int(h) * 3600 + int(m) * 60 + int(s)
-        percentage = int((total_seconds / 7200) * 100)
-        return min(percentage, 100)
+            
+        duration_match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2})", ff_log)
+        if not duration_match: 
+            return 0
+            
+        dh, dm, ds = duration_match.groups()
+        total_seconds = int(dh) * 3600 + int(dm) * 60 + int(ds)
+        if total_seconds == 0: 
+            return 0
+
+        time_matches = re.findall(r"time=(\d{2}):(\d{2}):(\d{2})", ff_log)
+        if not time_matches: 
+            return 0
+            
+        ch, cm, cs = time_matches[-1]
+        current_seconds = int(ch) * 3600 + int(cm) * 60 + int(cs)
+        
+        return min(int((current_seconds / total_seconds) * 100), 100)

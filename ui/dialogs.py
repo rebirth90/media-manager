@@ -47,8 +47,38 @@ class BrowserModalDialog(QDialog):
         js_code = """
             (function() {
                 var img = document.querySelector("img[src*='tmdb.org']") || document.querySelector("img[src*='imdb.com']");
-                var title = document.title || "";
-                return { imageUrl: img ? img.src : "", title: title };
+                var cleanTitle = "";
+                var tmdbId = "";
+                var tmdbType = "";
+                
+                var tmdbLink = document.querySelector("a[href*='themoviedb.org/movie/'], a[href*='themoviedb.org/tv/']");
+                if (tmdbLink) {
+                    if (tmdbLink.href.includes('/movie/')) tmdbType = "movie";
+                    else if (tmdbLink.href.includes('/tv/')) tmdbType = "tv";
+                    
+                    var urlParts = tmdbLink.href.split('?')[0].split('/');
+                    var lastPart = urlParts[urlParts.length - 1] || urlParts[urlParts.length - 2];
+                    if (lastPart) {
+                        var match = lastPart.match(/^(\\d+)/);
+                        if (match) tmdbId = match[1];
+                    }
+                }
+                
+                if (tmdbId && tmdbType) {
+                    cleanTitle = "tmdb:" + tmdbType + ":" + tmdbId;
+                } else {
+                    var rawTitle = "";
+                    var h1 = document.querySelector(".page-header, h1");
+                    if (h1) rawTitle = h1.textContent.trim();
+                    else rawTitle = document.title || "Unknown Media";
+                    
+                    var tmpTitle = rawTitle.split('.').join(' ');
+                    var match = tmpTitle.match(/^(.*?)(?:\\s+(?:1080p|720p|2160p|4k|web-dl|bluray|hdtv|x264|h264|hevc))/i);
+                    if (match) cleanTitle = match[1].trim();
+                    else cleanTitle = tmpTitle;
+                }
+                
+                return { imageUrl: img ? img.src : "", title: cleanTitle };
             })();
         """
         
