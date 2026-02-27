@@ -2,7 +2,7 @@ import os
 from typing import List, Any
 import qbittorrentapi
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QGridLayout, QVBoxLayout, QProgressBar, QSizePolicy
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QGridLayout, QVBoxLayout, QProgressBar, QSizePolicy, QWidget
 
 from workers.image_downloader import ImageDownloaderThread
 from workers.torrent_poller import TorrentPollingThread
@@ -25,11 +25,7 @@ class MediaFlowWidget(QFrame):
         self._illustration_path = r"C:\Users\Codrut\.gemini\antigravity\brain\8785b3f2-114a-4ae3-86c6-da36af48ada5\isometric_drafting_illustration_1772118592306.png"
 
         self.setStyleSheet("""
-            QFrame { 
-                background-color: #eaf2f8; 
-                border: 1.5px solid #dce9f2;
-                border-radius: 12px;
-            }
+            MediaFlowWidget { background-color: transparent; border: none; }
             QLabel { 
                 color: #1e293b; 
                 font-family: 'Segoe UI', 'San Francisco', 'Helvetica Neue', Arial; 
@@ -37,14 +33,29 @@ class MediaFlowWidget(QFrame):
                 background-color: transparent;
             }
         """)
-        self.setFixedHeight(64)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(10, 6, 10, 6)
+        self.main_layout.setContentsMargins(0, 0, 0, 10) # 10px bottom margin between flows
         self.main_layout.setSpacing(0)
 
-        self.top_layout = QHBoxLayout()
-        self.top_layout.setSpacing(12)
+        # Main Card Container
+        self.main_card_container = QWidget()
+        self.main_card_container.setObjectName("MainCard")
+        self.main_card_container.setStyleSheet("""
+            #MainCard {
+                background-color: #eaf2f8; 
+                border: 1.5px solid #dce9f2;
+                border-radius: 12px;
+            }
+        """)
+        self.main_card_container.setFixedHeight(64)
+        self.main_card_container.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.main_card_container.mousePressEvent = self._toggle_foldout
+
+        self.card_layout = QHBoxLayout(self.main_card_container)
+        self.card_layout.setContentsMargins(10, 6, 10, 6)
+        self.card_layout.setSpacing(12)
 
         # Left Section
         self.title_lbl = QLabel(self.title)
@@ -55,24 +66,16 @@ class MediaFlowWidget(QFrame):
             letter-spacing: -0.2px;
         """)
         self.title_lbl.setWordWrap(False)
-        self.top_layout.addWidget(self.title_lbl, stretch=6)
+        self.card_layout.addWidget(self.title_lbl, stretch=6)
 
         div1 = QFrame()
         div1.setFrameShape(QFrame.Shape.VLine)
         div1.setStyleSheet("border: 1px solid #cbd5e1; background-color: #cbd5e1;")
         div1.setFixedWidth(2)
-        self.top_layout.addWidget(div1)
+        self.card_layout.addWidget(div1)
 
-        # Middle Section (Wrap in clickable frame for foldout toggle)
-        self.mid_frame = QFrame()
-        self.mid_frame.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.mid_frame.setStyleSheet("""
-            QFrame { background-color: transparent; border: none; border-radius: 4px; }
-            QFrame:hover { background-color: #f8fafc; }
-        """)
-        self.mid_frame.mousePressEvent = self._toggle_foldout
-        
-        self.mid_layout = QHBoxLayout(self.mid_frame)
+        # Middle Section
+        self.mid_layout = QHBoxLayout()
         self.mid_layout.setContentsMargins(4, 0, 4, 0)
         self.mid_layout.setSpacing(8)
 
@@ -135,17 +138,16 @@ class MediaFlowWidget(QFrame):
         self.mid_layout.addWidget(self.lbl_prog_cap)
         self.mid_layout.addWidget(self.prog_bar_dl)
         _add_mid_div()
-        self.mid_layout.addWidget(self.lbl_speed_cap)
         self.mid_layout.addWidget(self.lbl_speed_val)
         self.mid_layout.addStretch()
 
-        self.top_layout.addWidget(self.mid_frame, stretch=3)
+        self.card_layout.addLayout(self.mid_layout, stretch=3)
 
         div2 = QFrame()
         div2.setFrameShape(QFrame.Shape.VLine)
         div2.setStyleSheet("border: 1px solid #cbd5e1; background-color: #cbd5e1;")
         div2.setFixedWidth(2)
-        self.top_layout.addWidget(div2)
+        self.card_layout.addWidget(div2)
 
         # Right Section (Flattened)
         self.conv_layout = QHBoxLayout()
@@ -181,15 +183,28 @@ class MediaFlowWidget(QFrame):
         self.conv_layout.addWidget(self.prog_bar_conv)
         self.conv_layout.addStretch()
         
-        self.top_layout.addLayout(self.conv_layout, stretch=2)
-        self.main_layout.addLayout(self.top_layout)
+        self.card_layout.addLayout(self.conv_layout, stretch=2)
+        self.main_layout.addWidget(self.main_card_container)
 
         # Foldout Container (Initially hidden)
-        self.foldout_container = QFrame()
-        self.foldout_container.setVisible(False)
-        self.foldout_container.setStyleSheet("background-color: transparent; border-top: 1px solid #dce9f2;")
-        foldout_v = QVBoxLayout(self.foldout_container)
-        foldout_v.setContentsMargins(10, 8, 10, 2)
+        self.details_foldout_container = QWidget()
+        self.details_foldout_container.setObjectName("FoldoutCard")
+        self.details_foldout_container.setVisible(False)
+        self.details_foldout_container.setStyleSheet("""
+            #FoldoutCard {
+                background-color: #ffffff;
+                border-left: 1.5px solid #dce9f2;
+                border-right: 1.5px solid #dce9f2;
+                border-bottom: 1.5px solid #dce9f2;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+                margin-top: -2px;
+            }
+        """)
+        self.details_foldout_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        
+        foldout_v = QVBoxLayout(self.details_foldout_container)
+        foldout_v.setContentsMargins(16, 12, 16, 12)
         
         self.foldout_layout = QHBoxLayout()
         self.foldout_layout.setSpacing(15)
@@ -227,23 +242,37 @@ class MediaFlowWidget(QFrame):
             
         self.foldout_layout.addStretch()
         foldout_v.addLayout(self.foldout_layout)
-        self.main_layout.addWidget(self.foldout_container)
-
-        # Overlay click button
-        self.overlay_btn = QPushButton(self)
-        self.overlay_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.overlay_btn.setStyleSheet("background-color: transparent; border: none;")
-        self.overlay_btn.clicked.connect(self._open_details_modal)
+        self.main_layout.addWidget(self.details_foldout_container)
 
         self._start_flow()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.overlay_btn.setGeometry(self.rect())
+        # Handle resize logic if necessary, no overlay_btn here
 
     def _toggle_foldout(self, event) -> None:
-        self.foldout_container.setVisible(not self.foldout_container.isVisible())
-        self.setFixedHeight(120 if self.foldout_container.isVisible() else 64)
+        if self.details_foldout_container.isVisible():
+            self.details_foldout_container.setVisible(False)
+            self.main_card_container.setStyleSheet("""
+                #MainCard {
+                    background-color: #eaf2f8; 
+                    border: 1.5px solid #dce9f2;
+                    border-radius: 12px;
+                }
+            """)
+        else:
+            self.details_foldout_container.setVisible(True)
+            self.main_card_container.setStyleSheet("""
+                #MainCard {
+                    background-color: #eaf2f8; 
+                    border: 1.5px solid #dce9f2;
+                    border-top-left-radius: 12px;
+                    border-top-right-radius: 12px;
+                    border-bottom-left-radius: 0px;
+                    border-bottom-right-radius: 0px;
+                    border-bottom: none;
+                }
+            """)
 
     def _open_details_modal(self) -> None:
         modal = FlowDetailsModal(
