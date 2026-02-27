@@ -18,8 +18,7 @@ class SecureServerWindow(QMainWindow):
         # Refined gradient background inspired by mockup - softer, more professional
         self.setStyleSheet("""
             QMainWindow { 
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #dce9f2, stop:0.3 #e8f2f8, stop:0.7 #e0edf5, stop:1 #d5e5f0);
+                background-color: #ffffff;
                 font-family: 'Segoe UI', 'San Francisco', 'Helvetica Neue', Arial, sans-serif; 
             }
         """)
@@ -46,16 +45,13 @@ class SecureServerWindow(QMainWindow):
                 padding: 0 28px; 
                 font-weight: 600; 
                 font-size: 11.5pt;
-                box-shadow: 0 3px 10px rgba(60, 120, 160, 0.15);
             }
             QPushButton:hover { 
                 background-color: #7db8d5; 
                 color: #081a2e; 
-                box-shadow: 0 4px 14px rgba(60, 120, 160, 0.22);
             }
             QPushButton:pressed {
                 background-color: #6ba8c8;
-                transform: scale(0.98);
             }
         """)
         self.btn_add_torrent.clicked.connect(self._spawn_browser_modal_with_blur)
@@ -94,10 +90,8 @@ class SecureServerWindow(QMainWindow):
         self.canvas_container = QWidget()
         self.canvas_container.setStyleSheet("""
             QWidget { 
-                background-color: rgba(255, 255, 255, 0.95); 
-                border-radius: 24px;
-                border: 1px solid #d8e4f0;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+                background-color: #ffffff; 
+                border: none;
             }
         """)
         canvas_layout = QVBoxLayout(self.canvas_container)
@@ -188,12 +182,10 @@ class SecureServerWindow(QMainWindow):
                 border: none;
                 border-radius: 20px; 
                 font-weight: 600;
-                box-shadow: 0 2px 6px rgba(60, 120, 160, 0.15);
             } 
             QPushButton:hover { 
                 background-color: #7db8d5; 
                 color: #081a2e; 
-                box-shadow: 0 3px 9px rgba(60, 120, 160, 0.22);
             }
         """)
         self.btn_next.clicked.connect(self._next_page)
@@ -291,12 +283,10 @@ class SecureServerWindow(QMainWindow):
                     border: none;
                     border-radius: 20px; 
                     font-weight: 600;
-                    box-shadow: 0 2px 6px rgba(60, 120, 160, 0.15);
                 } 
                 QPushButton:hover { 
                     background-color: #7db8d5; 
                     color: #081a2e; 
-                    box-shadow: 0 3px 9px rgba(60, 120, 160, 0.22);
                 }
             """)
         else:

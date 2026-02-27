@@ -28,7 +28,7 @@ class MediaFlowWidget(QFrame):
             QFrame { 
                 background-color: #eaf2f8; 
                 border: 1.5px solid #dce9f2;
-                border-radius: 8px;
+                border-radius: 12px;
             }
             QLabel { 
                 color: #1e293b; 
@@ -39,9 +39,12 @@ class MediaFlowWidget(QFrame):
         """)
         self.setFixedHeight(64)
 
-        self.main_layout = QHBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(10, 6, 10, 6)
-        self.main_layout.setSpacing(12)
+        self.main_layout.setSpacing(0)
+
+        self.top_layout = QHBoxLayout()
+        self.top_layout.setSpacing(12)
 
         # Left Section
         self.title_lbl = QLabel(self.title)
@@ -52,16 +55,25 @@ class MediaFlowWidget(QFrame):
             letter-spacing: -0.2px;
         """)
         self.title_lbl.setWordWrap(False)
-        self.main_layout.addWidget(self.title_lbl, stretch=6)
+        self.top_layout.addWidget(self.title_lbl, stretch=6)
 
         div1 = QFrame()
         div1.setFrameShape(QFrame.Shape.VLine)
         div1.setStyleSheet("border: 1px solid #cbd5e1; background-color: #cbd5e1;")
         div1.setFixedWidth(2)
-        self.main_layout.addWidget(div1)
+        self.top_layout.addWidget(div1)
 
-        # Middle Section (Flattened)
-        self.mid_layout = QHBoxLayout()
+        # Middle Section (Wrap in clickable frame for foldout toggle)
+        self.mid_frame = QFrame()
+        self.mid_frame.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mid_frame.setStyleSheet("""
+            QFrame { background-color: transparent; border: none; border-radius: 4px; }
+            QFrame:hover { background-color: #f8fafc; }
+        """)
+        self.mid_frame.mousePressEvent = self._toggle_foldout
+        
+        self.mid_layout = QHBoxLayout(self.mid_frame)
+        self.mid_layout.setContentsMargins(4, 0, 4, 0)
         self.mid_layout.setSpacing(8)
 
         lbl_style_cap = "font-size: 8pt; color: #64748b; font-weight: normal;"
@@ -127,13 +139,13 @@ class MediaFlowWidget(QFrame):
         self.mid_layout.addWidget(self.lbl_speed_val)
         self.mid_layout.addStretch()
 
-        self.main_layout.addLayout(self.mid_layout, stretch=3)
+        self.top_layout.addWidget(self.mid_frame, stretch=3)
 
         div2 = QFrame()
         div2.setFrameShape(QFrame.Shape.VLine)
         div2.setStyleSheet("border: 1px solid #cbd5e1; background-color: #cbd5e1;")
         div2.setFixedWidth(2)
-        self.main_layout.addWidget(div2)
+        self.top_layout.addWidget(div2)
 
         # Right Section (Flattened)
         self.conv_layout = QHBoxLayout()
@@ -169,7 +181,53 @@ class MediaFlowWidget(QFrame):
         self.conv_layout.addWidget(self.prog_bar_conv)
         self.conv_layout.addStretch()
         
-        self.main_layout.addLayout(self.conv_layout, stretch=2)
+        self.top_layout.addLayout(self.conv_layout, stretch=2)
+        self.main_layout.addLayout(self.top_layout)
+
+        # Foldout Container (Initially hidden)
+        self.foldout_container = QFrame()
+        self.foldout_container.setVisible(False)
+        self.foldout_container.setStyleSheet("background-color: transparent; border-top: 1px solid #dce9f2;")
+        foldout_v = QVBoxLayout(self.foldout_container)
+        foldout_v.setContentsMargins(10, 8, 10, 2)
+        
+        self.foldout_layout = QHBoxLayout()
+        self.foldout_layout.setSpacing(15)
+        
+        self.foldout_labels = {}
+        fields = [
+            "Size", "Progress", "DL Speed", "UL Speed", "Down (global)", 
+            "Up (global)", "ETA", "Peers", "Seeds", "State", 
+            "Ratio", "Category", "Tags", "Added On", "Avail"
+        ]
+        
+        for field in fields:
+            v_box = QVBoxLayout()
+            v_box.setSpacing(2)
+            lbl_cap = QLabel(field)
+            lbl_cap.setStyleSheet("font-size: 7.5pt; color: #94a3b8; font-weight: 500;")
+            lbl_val = QLabel("-")
+            lbl_val.setStyleSheet("font-size: 8.5pt; color: #334155; font-weight: bold;")
+            
+            if field == "Progress" or field == "State":
+                lbl_val.setStyleSheet("""
+                    font-size: 8pt; color: white; font-weight: bold;
+                    background-color: #16a34a; border-radius: 3px; padding: 2px 6px;
+                """)
+            elif field in ["Category", "Tags"]:
+                lbl_val.setStyleSheet("""
+                    font-size: 8pt; color: white; font-weight: bold;
+                    background-color: #0284c7; border-radius: 3px; padding: 2px 6px;
+                """)
+                
+            self.foldout_labels[field] = lbl_val
+            v_box.addWidget(lbl_cap)
+            v_box.addWidget(lbl_val)
+            self.foldout_layout.addLayout(v_box)
+            
+        self.foldout_layout.addStretch()
+        foldout_v.addLayout(self.foldout_layout)
+        self.main_layout.addWidget(self.foldout_container)
 
         # Overlay click button
         self.overlay_btn = QPushButton(self)
@@ -181,7 +239,11 @@ class MediaFlowWidget(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.overlay_btn.resize(self.size())
+        self.overlay_btn.setGeometry(self.rect())
+
+    def _toggle_foldout(self, event) -> None:
+        self.foldout_container.setVisible(not self.foldout_container.isVisible())
+        self.setFixedHeight(120 if self.foldout_container.isVisible() else 64)
 
     def _open_details_modal(self) -> None:
         modal = FlowDetailsModal(
@@ -243,12 +305,46 @@ class MediaFlowWidget(QFrame):
             dlspeed = t.get('dlspeed', 0)
             size = t.get('size', 0)
             
+            # Extended stats for foldout
+            ulspeed = t.get('upspeed', 0)
+            dl_global = t.get('downloaded', 0)
+            ul_global = t.get('uploaded', 0)
+            eta = t.get('eta', 8640000)
+            peers = t.get('num_incomplete', 0)
+            seeds = t.get('num_complete', 0)
+            ratio = t.get('ratio', 0.0)
+            category = t.get('category', '')
+            tags = t.get('tags', '')
+            added_on = t.get('added_on', 0)
+            availability = t.get('availability', -1.0)
+            
             self._active_qbit_state = f"State: {state} | Progress: {int(prog_val * 100)}% | Size: {self._format_size(size)}"
 
             self.lbl_state_val.setText(state.capitalize())
             self.lbl_size_val.setText(self._format_size(size))
             self.prog_bar_dl.setValue(int(prog_val * 100))
             self.lbl_speed_val.setText(self._format_speed(dlspeed))
+
+            # Update Foldout Dashboard
+            if hasattr(self, 'foldout_labels'):
+                self.foldout_labels["Size"].setText(self._format_size(size))
+                self.foldout_labels["Progress"].setText(f"{int(prog_val * 100)} %")
+                self.foldout_labels["DL Speed"].setText(self._format_speed(dlspeed))
+                self.foldout_labels["UL Speed"].setText(self._format_speed(ulspeed))
+                self.foldout_labels["Down (global)"].setText(self._format_size(dl_global))
+                self.foldout_labels["Up (global)"].setText(self._format_size(ul_global))
+                self.foldout_labels["ETA"].setText(self._format_time(eta))
+                self.foldout_labels["Peers"].setText(str(peers))
+                self.foldout_labels["Seeds"].setText(str(seeds))
+                
+                formatted_state = "Done" if state in ['uploading', 'stalledUP', 'pausedUP', 'completed'] or prog_val == 1.0 else state.capitalize()
+                self.foldout_labels["State"].setText(f" {formatted_state} ")
+                
+                self.foldout_labels["Ratio"].setText(f"{ratio:.2f}")
+                self.foldout_labels["Category"].setText(category if category else "(no category)")
+                self.foldout_labels["Tags"].setText(tags if tags else "(no tags)")
+                self.foldout_labels["Added On"].setText(self._format_timestamp(added_on))
+                self.foldout_labels["Avail"].setText(f"{availability:.1f}" if availability >= 0 else "-1")
 
             if prog_val == 1.0 or state in ['uploading', 'stalledUP', 'pausedUP', 'completed']:
                  if not hasattr(self, 'ssh_timer'):
@@ -309,6 +405,19 @@ class MediaFlowWidget(QFrame):
         if bytes_per_sec == 0: return "0 kB/s"
         elif bytes_per_sec < 1024**2: return f"{bytes_per_sec / 1024:.0f} kB/s"
         else: return f"{bytes_per_sec / (1024**2):.1f} MB/s"
+
+    def _format_time(self, seconds: int) -> str:
+        if seconds >= 8640000: return "∞" # 100 days representation by qbittorrent
+        m, s = divmod(seconds, 60)
+        h, m = divmod(m, 60)
+        if h > 0: return f"{h}h {m}m"
+        elif m > 0: return f"{m}m {s}s"
+        else: return f"{s}s"
+
+    def _format_timestamp(self, unix_ts: int) -> str:
+        if unix_ts <= 0: return "-"
+        from datetime import datetime
+        return datetime.fromtimestamp(unix_ts).strftime('%Y-%m-%d %H:%M:%S')
 
     def close_flow(self) -> None:
         if hasattr(self, 'poll_worker'): self.poll_worker.stop()

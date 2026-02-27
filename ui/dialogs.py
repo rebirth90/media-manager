@@ -6,7 +6,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QComboBox, QRadioButton, QVBoxLayout,
-    QPushButton, QTextEdit
+    QPushButton, QTextEdit, QWidget
 )
 
 class BrowserModalDialog(QDialog):
