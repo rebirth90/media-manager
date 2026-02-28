@@ -97,9 +97,20 @@ class MediaFlowWidget(QFrame):
         left_h.addWidget(self.icon_lbl)
         left_h.addWidget(self.title_lbl, stretch=1)
         
+        from PyQt6.QtGui import QPixmap
+        import os
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        self.chev_down = QPixmap(os.path.join(base_dir, "assets", "chevron_down.svg")).scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.chev_up = QPixmap(os.path.join(base_dir, "assets", "chevron_up.svg")).scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+        self.lbl_chev_left = QLabel()
+        self.lbl_chev_left.setPixmap(self.chev_down)
+        left_h.addWidget(self.lbl_chev_left)
+
         self.left_widget = QWidget()
         self.left_widget.setLayout(left_h)
         self.left_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.left_widget.setObjectName("ClickableSection")
         self.left_widget.mousePressEvent = lambda e: self._toggle_foldout(0)
         self.card_layout.addWidget(self.left_widget, stretch=6)
 
@@ -176,9 +187,14 @@ class MediaFlowWidget(QFrame):
         self.mid_layout.addWidget(self.lbl_speed_val)
         self.mid_layout.addStretch()
         
+        self.lbl_chev_mid = QLabel()
+        self.lbl_chev_mid.setPixmap(self.chev_down)
+        self.mid_layout.addWidget(self.lbl_chev_mid)
+        
         self.mid_widget = QWidget()
         self.mid_widget.setLayout(self.mid_layout)
         self.mid_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mid_widget.setObjectName("ClickableSection")
         self.mid_widget.mousePressEvent = lambda e: self._toggle_foldout(1)
         self.card_layout.addWidget(self.mid_widget, stretch=3)
 
@@ -237,13 +253,31 @@ class MediaFlowWidget(QFrame):
         self.conv_layout.addWidget(self.btn_trash_row)
         self.conv_layout.addStretch()
         
-        self.card_layout.addLayout(self.conv_layout, stretch=2)
+        self.lbl_chev_right = QLabel()
+        self.lbl_chev_right.setPixmap(self.chev_down)
+        self.conv_layout.addWidget(self.lbl_chev_right)
+        
+        self.right_widget = QWidget()
+        self.right_widget.setLayout(self.conv_layout)
+        self.right_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.right_widget.setObjectName("ClickableSection")
+        self.right_widget.mousePressEvent = lambda e: self._toggle_foldout(2)
+        self.card_layout.addWidget(self.right_widget, stretch=2)
+        
         self.main_layout.addWidget(self.main_card_container)
+
+        self._active_tab = -1
+        self._target_foldout_height = 200
+
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+        self.foldout_anim = QPropertyAnimation(self, b"") # We'll just define the object later or apply manually over max height
+        # Actually QPropertyAnimation on maximumHeight needs strict limits. Let's create it.
 
         # Foldout Container (Initially hidden)
         self.details_foldout_container = QWidget()
         self.details_foldout_container.setObjectName("FoldoutCard")
-        self.details_foldout_container.setVisible(False)
+        # Animation over maximumHeight instead of hide()
+        self.details_foldout_container.setMaximumHeight(0)
         self.details_foldout_container.setStyleSheet("""
             #FoldoutCard {
                 background-color: #ffffff;
@@ -255,6 +289,12 @@ class MediaFlowWidget(QFrame):
                 margin-top: -2px;
             }
         """)
+        
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+        self.foldout_anim = QPropertyAnimation(self.details_foldout_container, b"maximumHeight")
+        self.foldout_anim.setDuration(450)
+        self.foldout_anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        
         self.details_foldout_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         
         foldout_v = QVBoxLayout(self.details_foldout_container)
@@ -355,6 +395,10 @@ class MediaFlowWidget(QFrame):
         self.page_qbit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.foldout_stack.addWidget(self.page_qbit)
         
+        # PAGE 2: Conversion
+        self.page_conv = QWidget()
+        self.foldout_stack.addWidget(self.page_conv)
+        
         self.main_layout.addWidget(self.details_foldout_container)
 
         self._start_flow()
@@ -364,8 +408,21 @@ class MediaFlowWidget(QFrame):
         # Handle resize logic if necessary, no overlay_btn here
 
     def _toggle_foldout(self, index: int) -> None:
-        if self.details_foldout_container.isVisible() and self.foldout_stack.currentIndex() == index:
-            self.details_foldout_container.setVisible(False)
+        is_closing = (self._active_tab == index)
+        
+        # Reset all highlighting and chevrons
+        for widget, lbl_chev in [(self.left_widget, self.lbl_chev_left), 
+                                 (self.mid_widget, self.lbl_chev_mid), 
+                                 (self.right_widget, self.lbl_chev_right)]:
+            widget.setStyleSheet("QWidget#ClickableSection { background-color: transparent; border-radius: 10px; }")
+            lbl_chev.setPixmap(self.chev_down)
+            
+        if is_closing:
+            self._active_tab = -1
+            self.foldout_anim.setStartValue(self.details_foldout_container.height())
+            self.foldout_anim.setEndValue(0)
+            self.foldout_anim.start()
+            
             self.main_card_container.setStyleSheet("""
                 #MainCard {
                     background-color: #eaf2f8; 
@@ -374,8 +431,24 @@ class MediaFlowWidget(QFrame):
                 }
             """)
         else:
+            self._active_tab = index
             self.foldout_stack.setCurrentIndex(index)
-            self.details_foldout_container.setVisible(True)
+            
+            # Highlight selected widget
+            active_widget, active_chev = {
+                0: (self.left_widget, self.lbl_chev_left),
+                1: (self.mid_widget, self.lbl_chev_mid),
+                2: (self.right_widget, self.lbl_chev_right)
+            }[index]
+            active_widget.setStyleSheet("QWidget#ClickableSection { background-color: #f0f8ff; border-radius: 10px; }")
+            active_chev.setPixmap(self.chev_up)
+            
+            # Animate open if it was closed
+            if self.details_foldout_container.height() == 0:
+                self.foldout_anim.setStartValue(0)
+                self.foldout_anim.setEndValue(350) # Fallback max height bounds
+                self.foldout_anim.start()
+            
             self.main_card_container.setStyleSheet("""
                 #MainCard {
                     background-color: #eaf2f8; 

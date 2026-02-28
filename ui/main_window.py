@@ -111,11 +111,27 @@ class SecureServerWindow(QMainWindow):
         window_controls = QHBoxLayout()
         window_controls.setSpacing(8)
 
-        self.btn_minimize = QPushButton("🗕")
-        self.btn_maximize = QPushButton("🗗") # Initially maximized
-        self.btn_close = QPushButton("✕")
+        self.btn_minimize = QPushButton()
+        self.btn_maximize = QPushButton() # Initially maximized state implies restoring next, but we start max
+        self.btn_close = QPushButton()
+
+        import os
+        from PyQt6.QtGui import QIcon
+        from PyQt6.QtCore import QSize
+        
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        self.icon_min = QIcon(os.path.join(base_dir, "assets", "win_min.svg"))
+        self.icon_max = QIcon(os.path.join(base_dir, "assets", "win_max.svg"))
+        self.icon_restore = QIcon(os.path.join(base_dir, "assets", "win_restore.svg"))
+        self.icon_close = QIcon(os.path.join(base_dir, "assets", "win_close.svg"))
+
+        self.btn_minimize.setIcon(self.icon_min)
+        # Assuming the window starts maximized (as it does in main.py, showMaximized)
+        self.btn_maximize.setIcon(self.icon_restore) 
+        self.btn_close.setIcon(self.icon_close)
 
         for btn in [self.btn_minimize, self.btn_maximize, self.btn_close]:
+            btn.setIconSize(QSize(18, 18))
             btn.setFixedSize(36, 36)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet("""
@@ -123,13 +139,9 @@ class SecureServerWindow(QMainWindow):
                     background-color: transparent;
                     border: none;
                     border-radius: 18px;
-                    color: #a0b0c0;
-                    font-size: 14pt;
-                    font-weight: bold;
                 }
                 QPushButton:hover {
                     background-color: #f0f6fa;
-                    color: #3d4f60;
                 }
             """)
 
@@ -138,13 +150,9 @@ class SecureServerWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
                 border-radius: 18px;
-                color: #a0b0c0;
-                font-size: 14pt;
-                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #ffe6e6;
-                color: #ff4d4f;
             }
         """)
 
@@ -272,10 +280,10 @@ class SecureServerWindow(QMainWindow):
     def _toggle_maximize(self) -> None:
         if self.isMaximized():
             self.showNormal()
-            self.btn_maximize.setText("🗖")
+            self.btn_maximize.setIcon(self.icon_max)
         else:
             self.showMaximized()
-            self.btn_maximize.setText("🗗")
+            self.btn_maximize.setIcon(self.icon_restore)
 
     def mousePressEvent(self, event) -> None:
         from PyQt6.QtCore import Qt
