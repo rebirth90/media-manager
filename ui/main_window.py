@@ -60,7 +60,12 @@ class SecureServerWindow(QMainWindow):
         nav_layout.setSpacing(18)
         
         # Add button with refined styling matching mockup
-        self.btn_add_torrent = QPushButton("+ Movie / TV-Series")
+        self.btn_add_torrent = QPushButton(" Movie / TV-Series")
+        from PyQt6.QtGui import QIcon
+        from PyQt6.QtCore import QSize
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        self.btn_add_torrent.setIcon(QIcon(os.path.join(base_dir, "assets", "add_icon.svg")))
+        self.btn_add_torrent.setIconSize(QSize(18, 18))
         self.btn_add_torrent.setFixedHeight(48)
         self.btn_add_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_torrent.setStyleSheet("""
@@ -85,7 +90,10 @@ class SecureServerWindow(QMainWindow):
         
         # Refined search bar matching mockup design
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("🔍 Search")
+        self.search_bar.setPlaceholderText("Search")
+        from PyQt6.QtGui import QAction
+        search_action = QAction(QIcon(os.path.join(base_dir, "assets", "search_icon.svg")), "Search", self)
+        self.search_bar.addAction(search_action, QLineEdit.ActionPosition.LeadingPosition)
         self.search_bar.setFixedHeight(48)
         self.search_bar.setMaximumWidth(480)
         self.search_bar.setStyleSheet("""
@@ -115,11 +123,6 @@ class SecureServerWindow(QMainWindow):
         self.btn_maximize = QPushButton() # Initially maximized state implies restoring next, but we start max
         self.btn_close = QPushButton()
 
-        import os
-        from PyQt6.QtGui import QIcon
-        from PyQt6.QtCore import QSize
-        
-        base_dir = os.path.dirname(os.path.dirname(__file__))
         self.icon_min = QIcon(os.path.join(base_dir, "assets", "win_min.svg"))
         self.icon_max = QIcon(os.path.join(base_dir, "assets", "win_max.svg"))
         self.icon_restore = QIcon(os.path.join(base_dir, "assets", "win_restore.svg"))
@@ -131,7 +134,7 @@ class SecureServerWindow(QMainWindow):
         self.btn_close.setIcon(self.icon_close)
 
         for btn in [self.btn_minimize, self.btn_maximize, self.btn_close]:
-            btn.setIconSize(QSize(18, 18))
+            btn.setIconSize(QSize(20, 20))
             btn.setFixedSize(36, 36)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet("""
