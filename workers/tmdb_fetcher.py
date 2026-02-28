@@ -29,6 +29,7 @@ class TMDBFetcherThread(QThread):
         if not token:
             self.error.emit("No TMDB Token found.")
             self.title_resolved.emit(self.tmdb_id)
+            self.details_resolved.emit({})
             return
 
         headers = {
@@ -52,17 +53,20 @@ class TMDBFetcherThread(QThread):
                     else:
                         self.error.emit("IMDB ID not found in TMDB.")
                         self.title_resolved.emit(self.tmdb_id)
+                        self.details_resolved.emit({})
                         return
                 else:
                     self.error.emit(f"TMDB Find API Error: {find_res.status_code}")
                     self.title_resolved.emit(self.tmdb_id)
+                    self.details_resolved.emit({})
                     return
             except Exception as e:
                 self.error.emit(str(e))
                 self.title_resolved.emit(self.tmdb_id)
+                self.details_resolved.emit({})
                 return
 
-        url = f"https://api.themoviedb.org/3/{self.media_type}/{self.tmdb_id}"
+        url = f"https://api.themoviedb.org/3/{self.media_type}/{self.tmdb_id}?append_to_response=external_ids"
         
         try:
             response = requests.get(url, headers=headers, timeout=10)
@@ -83,6 +87,24 @@ class TMDBFetcherThread(QThread):
                 poster_path = data.get("poster_path")
                 img_url = f"https://image.tmdb.org/t/p/w300_and_h450_bestv2{poster_path}" if poster_path else ""
                 
+                if not img_url:
+                    imdb_id = data.get("imdb_id") or data.get("external_ids", {}).get("imdb_id")
+                    if imdb_id:
+                        import re
+                        imdb_url = f"https://www.imdb.com/title/{imdb_id}/"
+                        imdb_headers = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+                            "Accept-Language": "en-US,en;q=0.5"
+                        }
+                        try:
+                            imdb_res = requests.get(imdb_url, headers=imdb_headers, timeout=10)
+                            if imdb_res.status_code == 200:
+                                match = re.search(r'<meta property="og:image" content="(.*?)"', imdb_res.text)
+                                if match:
+                                    img_url = match.group(1)
+                        except Exception:
+                            pass
+                
                 self.title_resolved.emit(full_title)
                 self.details_resolved.emit({
                     "description": desc,
@@ -93,6 +115,8 @@ class TMDBFetcherThread(QThread):
             else:
                 self.error.emit(f"TMDB API Error: {response.status_code}")
                 self.title_resolved.emit(self.tmdb_id)
+                self.details_resolved.emit({})
         except Exception as e:
             self.error.emit(str(e))
             self.title_resolved.emit(self.tmdb_id)
+            self.details_resolved.emit({})

@@ -55,14 +55,36 @@ class MediaFlowWidget(QFrame):
             }
         """)
         self.main_card_container.setFixedHeight(64)
-        self.main_card_container.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.main_card_container.mousePressEvent = self._toggle_foldout
 
         self.card_layout = QHBoxLayout(self.main_card_container)
         self.card_layout.setContentsMargins(10, 6, 10, 6)
         self.card_layout.setSpacing(12)
 
         # Left Section
+        from PyQt6.QtGui import QPixmap
+        import os
+        
+        left_h = QHBoxLayout()
+        left_h.setContentsMargins(0, 0, 0, 0)
+        left_h.setSpacing(10)
+        
+        self.icon_lbl = QLabel()
+        self.icon_lbl.setFixedSize(28, 28)
+        self.icon_lbl.setStyleSheet("background-color: transparent;")
+        
+        # Determine icon based on category in relative_path
+        is_movie = self.relative_path.startswith("movies")
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_dir, "assets", "movie_icon.png" if is_movie else "tv_icon.png")
+        
+        if os.path.exists(icon_path):
+            pix = QPixmap(icon_path).scaled(
+                28, 28, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.icon_lbl.setPixmap(pix)
+            
         self.title_lbl = QLabel(self.title)
         self.title_lbl.setStyleSheet("""
             font-size: 12pt; 
@@ -71,7 +93,15 @@ class MediaFlowWidget(QFrame):
             letter-spacing: -0.2px;
         """)
         self.title_lbl.setWordWrap(False)
-        self.card_layout.addWidget(self.title_lbl, stretch=6)
+        
+        left_h.addWidget(self.icon_lbl)
+        left_h.addWidget(self.title_lbl, stretch=1)
+        
+        self.left_widget = QWidget()
+        self.left_widget.setLayout(left_h)
+        self.left_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.left_widget.mousePressEvent = lambda e: self._toggle_foldout(0)
+        self.card_layout.addWidget(self.left_widget, stretch=6)
 
         div1 = QFrame()
         div1.setFrameShape(QFrame.Shape.VLine)
@@ -145,8 +175,12 @@ class MediaFlowWidget(QFrame):
         _add_mid_div()
         self.mid_layout.addWidget(self.lbl_speed_val)
         self.mid_layout.addStretch()
-
-        self.card_layout.addLayout(self.mid_layout, stretch=3)
+        
+        self.mid_widget = QWidget()
+        self.mid_widget.setLayout(self.mid_layout)
+        self.mid_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mid_widget.mousePressEvent = lambda e: self._toggle_foldout(1)
+        self.card_layout.addWidget(self.mid_widget, stretch=3)
 
         div2 = QFrame()
         div2.setFrameShape(QFrame.Shape.VLine)
@@ -186,11 +220,18 @@ class MediaFlowWidget(QFrame):
         
         self.conv_layout.addWidget(self.lbl_conv_state_val)
         self.conv_layout.addWidget(self.prog_bar_conv)
-        self.btn_trash_row = QPushButton("🗑 Delete")
+        self.btn_trash_row = QPushButton()
+        from PyQt6.QtGui import QIcon
+        from PyQt6.QtCore import QSize
+        import os
+        trash_icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "trash_icon.svg")
+        self.btn_trash_row.setIcon(QIcon(trash_icon_path))
+        self.btn_trash_row.setIconSize(QSize(20, 20))
+        self.btn_trash_row.setFixedSize(28, 28)
         self.btn_trash_row.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_trash_row.setStyleSheet("""
-            QPushButton { background-color: transparent; border: none; color: #ef4444; font-weight: bold;}
-            QPushButton:hover { background-color: #fee2e2; border-radius: 4px; }
+            QPushButton { background-color: transparent; border: none; }
+            QPushButton:hover { background-color: #f1f5f9; border-radius: 6px; }
         """)
         self.btn_trash_row.clicked.connect(self._prompt_delete)
         self.conv_layout.addWidget(self.btn_trash_row)
@@ -217,16 +258,73 @@ class MediaFlowWidget(QFrame):
         self.details_foldout_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         
         foldout_v = QVBoxLayout(self.details_foldout_container)
-        foldout_v.setContentsMargins(16, 12, 16, 12)
+        foldout_v.setContentsMargins(0, 0, 0, 0)
         
-        self.foldout_layout = QHBoxLayout()
+        from PyQt6.QtWidgets import QStackedWidget
+        self.foldout_stack = QStackedWidget()
+        
+        # Ensure it shrinks to inner content heights
+        self.foldout_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        foldout_v.addWidget(self.foldout_stack)
+        
+        # Enforce the foldout container itself to shrink to minimum
+        foldout_v.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        # PAGE 0: Metadata
+        self.page_meta = QWidget()
+        foldout_main_h = QHBoxLayout(self.page_meta)
+        foldout_main_h.setContentsMargins(16, 16, 16, 16)
+        foldout_main_h.setSpacing(20)
+
+        # Poster Image Container (pinned to top)
+        self.poster_v = QVBoxLayout()
+        self.poster_v.setSpacing(0)
+        self.lbl_poster = QLabel()
+        self.lbl_poster.setFixedSize(120, 180)
+        self.lbl_poster.setStyleSheet("background-color: transparent; border-radius: 8px;")
+        self.lbl_poster.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_poster.hide()
+        self.poster_v.addWidget(self.lbl_poster)
+        self.poster_v.addStretch()
+        foldout_main_h.addLayout(self.poster_v)
+
+        # Metadata Layout
+        foldout_content_v = QVBoxLayout()
+        foldout_content_v.setSpacing(10)
+        
+        self.lbl_foldout_title = QLabel(self.title)
+        self.lbl_foldout_title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #0f172a;")
+        self.lbl_foldout_title.setWordWrap(True)
+        foldout_content_v.addWidget(self.lbl_foldout_title)
+
+        self.lbl_foldout_genre_rating = QLabel("Genre: N/A | Rating: N/A")
+        self.lbl_foldout_genre_rating.setStyleSheet("font-size: 9.5pt; color: #64748b; font-weight: 500;")
+        foldout_content_v.addWidget(self.lbl_foldout_genre_rating)
+
+        self.lbl_foldout_desc = QLabel("No description available.")
+        self.lbl_foldout_desc.setStyleSheet("font-size: 9.5pt; color: #475569;")
+        self.lbl_foldout_desc.setWordWrap(True)
+        self.lbl_foldout_desc.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        foldout_content_v.addWidget(self.lbl_foldout_desc)
+        foldout_content_v.addStretch()
+        
+        foldout_main_h.addLayout(foldout_content_v, stretch=1)
+        
+        # Ensure page meta shrinks to its layout
+        self.page_meta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.foldout_stack.addWidget(self.page_meta)
+        
+        # PAGE 1: QBit Metrics
+        self.page_qbit = QWidget()
+        self.foldout_layout = QHBoxLayout(self.page_qbit)
+        self.foldout_layout.setContentsMargins(16, 12, 16, 12)
         self.foldout_layout.setSpacing(15)
+        self.foldout_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         
         self.foldout_labels = {}
         fields = [
             "Size", "Progress", "DL Speed", "UL Speed", "Down (global)", 
-            "Up (global)", "ETA", "Peers", "Seeds", "State", 
-            "Ratio", "Category", "Tags", "Added On", "Avail"
+            "Up (global)", "ETA", "Peers", "Seeds", "State"
         ]
         
         for field in fields:
@@ -249,12 +347,14 @@ class MediaFlowWidget(QFrame):
                 """)
                 
             self.foldout_labels[field] = lbl_val
-            v_box.addWidget(lbl_cap)
-            v_box.addWidget(lbl_val)
+            v_box.addWidget(lbl_cap, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            v_box.addWidget(lbl_val, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             self.foldout_layout.addLayout(v_box)
             
         self.foldout_layout.addStretch()
-        foldout_v.addLayout(self.foldout_layout)
+        self.page_qbit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.foldout_stack.addWidget(self.page_qbit)
+        
         self.main_layout.addWidget(self.details_foldout_container)
 
         self._start_flow()
@@ -263,8 +363,8 @@ class MediaFlowWidget(QFrame):
         super().resizeEvent(event)
         # Handle resize logic if necessary, no overlay_btn here
 
-    def _toggle_foldout(self, event) -> None:
-        if self.details_foldout_container.isVisible():
+    def _toggle_foldout(self, index: int) -> None:
+        if self.details_foldout_container.isVisible() and self.foldout_stack.currentIndex() == index:
             self.details_foldout_container.setVisible(False)
             self.main_card_container.setStyleSheet("""
                 #MainCard {
@@ -274,6 +374,7 @@ class MediaFlowWidget(QFrame):
                 }
             """)
         else:
+            self.foldout_stack.setCurrentIndex(index)
             self.details_foldout_container.setVisible(True)
             self.main_card_container.setStyleSheet("""
                 #MainCard {
@@ -305,9 +406,9 @@ class MediaFlowWidget(QFrame):
             self.tmdb_fetcher.title_resolved.connect(self._on_title_resolved)
             self.tmdb_fetcher.details_resolved.connect(self._on_details_resolved)
             self.tmdb_fetcher.start()
-            
-        if self.image_url:
+        elif self.image_url:
             self.img_thread = ImageDownloaderThread(self.image_url, self)
+            self.img_thread.finished.connect(self._on_image_downloaded)
             self.img_thread.start()
 
         self.poll_worker = TorrentPollingThread(self)
@@ -337,13 +438,37 @@ class MediaFlowWidget(QFrame):
 
     def _on_title_resolved(self, resolved_title: str) -> None:
         self.title_lbl.setText(resolved_title)
+        self.lbl_foldout_title.setText(resolved_title)
         self.title = resolved_title
 
     def _on_details_resolved(self, details: dict) -> None:
+        desc = details.get("description", "No description available.")
+        genre = details.get("genre", "Unknown")
+        rating = details.get("rating", "-")
+        
+        self.lbl_foldout_desc.setText(desc)
+        self.lbl_foldout_genre_rating.setText(f"Genre: {genre} | Rating: ★ {rating}")
+        
         img_url = details.get("image_url")
         if img_url:
             self.img_thread = ImageDownloaderThread(img_url, self)
+            self.img_thread.finished.connect(self._on_image_downloaded)
             self.img_thread.start()
+        elif self.image_url:
+            self.img_thread = ImageDownloaderThread(self.image_url, self)
+            self.img_thread.finished.connect(self._on_image_downloaded)
+            self.img_thread.start()
+
+    def _on_image_downloaded(self, data: bytes) -> None:
+        if data:
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap()
+            if pixmap.loadFromData(data):
+                pixmap = pixmap.scaled(self.lbl_poster.width(), self.lbl_poster.height(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                self.lbl_poster.setPixmap(pixmap)
+                self.lbl_poster.setText("")
+                self.lbl_poster.setStyleSheet("background-color: transparent; border-radius: 8px; border: 1px solid #e2e8f0;")
+                self.lbl_poster.show()
 
     def _update_torrent_ui(self, data_payload: List[Any]) -> None:
         target_torrents, _ = data_payload
@@ -368,9 +493,32 @@ class MediaFlowWidget(QFrame):
             added_on = t.get('added_on', 0)
             availability = t.get('availability', -1.0)
             
-            self._active_qbit_state = f"State: {state} | Progress: {int(prog_val * 100)}% | Size: {self._format_size(size)}"
+            # Formatted status logic based on VueTorrent badges
+            is_done = state in ['uploading', 'stalledUP', 'pausedUP', 'completed', 'stalledDL'] and prog_val == 1.0
+            
+            human_state = "Unknown"
+            if is_done or prog_val == 1.0:
+                human_state = "Done"
+                state_txt = "✅ Done"
+                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #16a34a; border-radius: 4px; padding: 2px 8px;"
+            elif state in ['downloading', 'stalledDL'] and prog_val < 1.0:
+                human_state = "Downloading"
+                state_txt = "📥 Downloading"
+                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #2563eb; border-radius: 4px; padding: 2px 8px;"
+            elif state in ['pausedDL', 'stopped', 'stoppedDL', 'checkingDL', 'checkingUP']:
+                human_state = "Stopped"
+                state_txt = "⏹️ Stopped"
+                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #64748b; border-radius: 4px; padding: 2px 8px;"
+            else:
+                human_state = state.capitalize()
+                state_txt = f"⏳ {human_state}"
+                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #f59e0b; border-radius: 4px; padding: 2px 8px;"
 
-            self.lbl_state_val.setText(state.capitalize())
+            self._active_qbit_state = f"State: {human_state} | Progress: {int(prog_val * 100)}% | Size: {self._format_size(size)}"
+
+            self.lbl_state_val.setText(state_txt)
+            self.lbl_state_val.setStyleSheet(state_css)
+            
             self.lbl_size_val.setText(self._format_size(size))
             self.prog_bar_dl.setValue(int(prog_val * 100))
             self.lbl_speed_val.setText(self._format_speed(dlspeed))
@@ -387,14 +535,9 @@ class MediaFlowWidget(QFrame):
                 self.foldout_labels["Peers"].setText(str(peers))
                 self.foldout_labels["Seeds"].setText(str(seeds))
                 
-                formatted_state = "Done" if state in ['uploading', 'stalledUP', 'pausedUP', 'completed'] or prog_val == 1.0 else state.capitalize()
-                self.foldout_labels["State"].setText(f" {formatted_state} ")
                 
-                self.foldout_labels["Ratio"].setText(f"{ratio:.2f}")
-                self.foldout_labels["Category"].setText(category if category else "(no category)")
-                self.foldout_labels["Tags"].setText(tags if tags else "(no tags)")
-                self.foldout_labels["Added On"].setText(self._format_timestamp(added_on))
-                self.foldout_labels["Avail"].setText(f"{availability:.1f}" if availability >= 0 else "-1")
+                self.foldout_labels["State"].setText(state_txt)
+                self.foldout_labels["State"].setStyleSheet(state_css)
 
             if prog_val == 1.0 or state in ['uploading', 'stalledUP', 'pausedUP', 'completed']:
                  if not hasattr(self, 'ssh_timer'):

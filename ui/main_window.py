@@ -89,7 +89,6 @@ class SecureServerWindow(QMainWindow):
         self.search_bar.setFixedHeight(48)
         self.search_bar.setMaximumWidth(480)
         self.search_bar.setStyleSheet("""
-            QLineEdit { 
             QLineEdit {
                 background-color: #ffffff;
                 border: 2px solid #c8d8e8;
