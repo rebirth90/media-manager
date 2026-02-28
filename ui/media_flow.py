@@ -12,13 +12,18 @@ from services.ssh_telemetry import SSHTelemetryClient
 from ui.dialogs import FlowDetailsModal
 
 class MediaFlowWidget(QFrame):
-    def __init__(self, index: int, relative_path: str, torrent_bytes: bytes, image_url: str, title: str, parent=None):
+    def __init__(self, index: int, relative_path: str, torrent_bytes: bytes, image_url: str, title: str, season: str = "", parent=None):
         super().__init__(parent)
         self.flow_index = index
         self.relative_path = relative_path
         self.torrent_bytes = torrent_bytes
         self.image_url = image_url
-        self.title = title if title else "Unknown Media"
+        base_title = title if title else "Unknown Media"
+        if season:
+            self.title = f"{base_title} - {season}"
+        else:
+            self.title = base_title
+        self._current_hash = ""
 
         self._active_qbit_state = "Initializing..."
         self._active_ffmpeg_log = "Awaiting conversion pipeline..."
@@ -181,6 +186,14 @@ class MediaFlowWidget(QFrame):
         
         self.conv_layout.addWidget(self.lbl_conv_state_val)
         self.conv_layout.addWidget(self.prog_bar_conv)
+        self.btn_trash_row = QPushButton("🗑 Delete")
+        self.btn_trash_row.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_trash_row.setStyleSheet("""
+            QPushButton { background-color: transparent; border: none; color: #ef4444; font-weight: bold;}
+            QPushButton:hover { background-color: #fee2e2; border-radius: 4px; }
+        """)
+        self.btn_trash_row.clicked.connect(self._prompt_delete)
+        self.conv_layout.addWidget(self.btn_trash_row)
         self.conv_layout.addStretch()
         
         self.card_layout.addLayout(self.conv_layout, stretch=2)
@@ -290,6 +303,7 @@ class MediaFlowWidget(QFrame):
             self.title_lbl.setText(tmdb_id)
             self.tmdb_fetcher = TMDBFetcherThread(tmdb_id, media_type, self)
             self.tmdb_fetcher.title_resolved.connect(self._on_title_resolved)
+            self.tmdb_fetcher.details_resolved.connect(self._on_details_resolved)
             self.tmdb_fetcher.start()
             
         if self.image_url:
@@ -325,10 +339,17 @@ class MediaFlowWidget(QFrame):
         self.title_lbl.setText(resolved_title)
         self.title = resolved_title
 
+    def _on_details_resolved(self, details: dict) -> None:
+        img_url = details.get("image_url")
+        if img_url:
+            self.img_thread = ImageDownloaderThread(img_url, self)
+            self.img_thread.start()
+
     def _update_torrent_ui(self, data_payload: List[Any]) -> None:
         target_torrents, _ = data_payload
         if target_torrents:
             t = target_torrents[0]
+            self._current_hash = t.get('hash', "")
             prog_val = t.get('progress', 0.0)
             state = t.get('state', 'Unknown')
             dlspeed = t.get('dlspeed', 0)
@@ -452,3 +473,23 @@ class MediaFlowWidget(QFrame):
         if hasattr(self, 'poll_worker'): self.poll_worker.stop()
         if hasattr(self, 'ssh_timer'): self.ssh_timer.stop()
         if hasattr(self, 'ssh_worker') and self.ssh_worker.isRunning(): self.ssh_worker.wait()
+        if hasattr(self, 'del_worker') and self.del_worker.isRunning(): self.del_worker.wait()
+
+    def _prompt_delete(self) -> None:
+        from ui.dialogs import DeleteTorrentDialog
+        if not self._current_hash:
+            return
+            
+        from PyQt6.QtWidgets import QDialog
+        dialog = DeleteTorrentDialog(self.title, self.window())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            delete_files = dialog.should_delete_files()
+            from services.qbittorrent import QBittorrentDeleteWorker
+            self.del_worker = QBittorrentDeleteWorker([self._current_hash], delete_files, self)
+            self.del_worker.finished.connect(self._on_deleted)
+            self.del_worker.start()
+
+    def _on_deleted(self, success: bool) -> None:
+        if success:
+            self.close_flow()
+            self.setParent(None)

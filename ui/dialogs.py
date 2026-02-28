@@ -10,10 +10,11 @@ from PyQt6.QtWidgets import (
 )
 
 class BrowserModalDialog(QDialog):
-    torrent_downloaded = pyqtSignal(str, str, str)
+    torrent_downloaded = pyqtSignal(str, str, str, str)
 
-    def __init__(self, parent=None):
+    def __init__(self, profile, parent=None):
         super().__init__(parent)
+        self.profile = profile
         self.setWindowTitle("Filelist Torrents Browser")
         
         # Modern dark theme for browser modal
@@ -30,19 +31,48 @@ class BrowserModalDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        self.web_view = QWebEngineView()
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        self.web_view = QWebEngineView(self)
+        new_page = QWebEnginePage(self.profile, self.web_view)
+        self.web_view.setPage(new_page)
+
         self.web_view.setStyleSheet("border-radius: 12px;")
         layout.addWidget(self.web_view)
 
-        profile = self.web_view.page().profile()
-        profile.downloadRequested.connect(self._on_download_requested)
+        self.profile.downloadRequested.connect(self._on_download_requested)
         self.web_view.page().loadFinished.connect(self._on_page_loaded)
 
-        self.web_view.setUrl(QUrl("https://filelist.io/login.php"))
+        self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
         self._current_request = None
 
     def _on_download_requested(self, request: QWebEngineDownloadRequest) -> None:
         self._current_request = request
+        
+        temp_dir = os.path.join(os.getcwd(), "temp_torrents")
+        os.makedirs(temp_dir, exist_ok=True)
+        request.setDownloadDirectory(temp_dir)
+        request.accept()
+        
+        state_dict = {"img_url": None, "title": None, "season": None, "completed": False}
+        
+        def try_finish():
+            if state_dict["completed"] and state_dict["title"] is not None:
+                file_path = request.downloadDirectory() + os.sep + request.downloadFileName()
+                print(f"DEBUG: Download completed successfully! File: {file_path}")
+                self.torrent_downloaded.emit(file_path, state_dict["img_url"], state_dict["title"], state_dict.get("season") or "")
+                self.accept()
+                
+        def on_state_changed(state):
+            print(f"DEBUG: State changed to {state}")
+            if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+                state_dict["completed"] = True
+                try_finish()
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
+                print("DEBUG: Download cancelled")
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
+                print(f"DEBUG: Download interrupted. Reason: {request.interruptReasonString()}")
+                
+        request.stateChanged.connect(on_state_changed)
         
         js_code = """
             (function() {
@@ -64,6 +94,17 @@ class BrowserModalDialog(QDialog):
                     }
                 }
                 
+                if (!tmdbId) {
+                    var imdbLink = document.querySelector("a[href*='imdb.com/title/']");
+                    if (imdbLink) {
+                        var match = imdbLink.href.match(/tt\\d+/);
+                        if (match) {
+                            tmdbId = match[0];
+                            tmdbType = "imdb";
+                        }
+                    }
+                }
+                
                 if (tmdbId && tmdbType) {
                     cleanTitle = "tmdb:" + tmdbType + ":" + tmdbId;
                 } else {
@@ -78,22 +119,28 @@ class BrowserModalDialog(QDialog):
                     else cleanTitle = tmpTitle;
                 }
                 
-                return { imageUrl: img ? img.src : "", title: cleanTitle };
+                var seasonStr = "";
+                var titleToRegex = window.document.title;
+                var h1Element = document.querySelector(".page-header, h1");
+                if (h1Element) titleToRegex = h1Element.textContent;
+                
+                var sMatch = titleToRegex.match(/[Ss](\\d{1,2})|Season\\s*(\\d{1,2})/i);
+                if (sMatch) {
+                    var sNum = parseInt(sMatch[1] || sMatch[2], 10);
+                    if (!isNaN(sNum)) {
+                        seasonStr = "Season " + sNum;
+                    }
+                }
+                
+                return { imageUrl: img ? img.src : "", title: cleanTitle, season: seasonStr };
             })();
         """
         
         def js_callback(result):
-            img_url = result.get('imageUrl', '') if isinstance(result, dict) else ''
-            title = result.get('title', 'Unknown Media') if isinstance(result, dict) else 'Unknown Media'
-            
-            temp_dir = os.path.join(os.getcwd(), "temp_torrents")
-            os.makedirs(temp_dir, exist_ok=True)
-            request.setDownloadDirectory(temp_dir)
-            
-            request.accept()
-            request.stateChanged.connect(
-                lambda state: self._on_download_state_changed(state, request, img_url, title)
-            )
+            state_dict["img_url"] = result.get('imageUrl', '') if isinstance(result, dict) else ''
+            state_dict["title"] = result.get('title', 'Unknown Media') if isinstance(result, dict) else 'Unknown Media'
+            state_dict["season"] = result.get('season', '') if isinstance(result, dict) else ''
+            try_finish()
             
         self.web_view.page().runJavaScript(js_code, js_callback)
 
@@ -104,38 +151,33 @@ class BrowserModalDialog(QDialog):
         current_url = self.web_view.url().toString()
         
         if "login.php" in current_url:
-            user = os.getenv("FILELIST_USER", "")
-            password = os.getenv("FILELIST_PASS", "")
-            js_code = f'''
-                (function() {{
-                    var u = document.querySelector('input[name="username"]');
-                    var p = document.querySelector('input[name="password"]');
-                    var c = document.querySelector('input[name="unlock"]');
-                    var s = document.querySelector('input[type="submit"]');
-                    if(u && p && c) {{ 
-                        u.value="{user}"; 
-                        p.value="{password}"; 
-                        c.checked=true; 
-                        s ? s.click() : document.forms[0].submit(); 
-                    }}
-                }})();
-            '''
-            self.web_view.page().runJavaScript(js_code)
-            
-        elif current_url in ["https://filelist.io/", "https://filelist.io/index.php"]:
-            self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
+            print("DEBUG: Cookie expired or missing. Delegating to background auth manager...")
+            parent_win = self.parent()
+            if hasattr(parent_win, 'auth_manager'):
+                self.web_view.setDisabled(True)
+                parent_win.auth_manager.authenticated.connect(self._on_reauth_success)
+                parent_win.auth_manager.login()
+            else:
+                print("ERROR: Background auth manager not found!")
+                
+    def _on_reauth_success(self):
+        print("DEBUG: Background re-auth successful. Reloading browse page in modal...")
+        parent_win = self.parent()
+        if hasattr(parent_win, 'auth_manager'):
+            try:
+                parent_win.auth_manager.authenticated.disconnect(self._on_reauth_success)
+            except TypeError:
+                pass
+        self.web_view.setDisabled(False)
+        self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
 
-    def _on_download_state_changed(
-        self, 
-        state: QWebEngineDownloadRequest.DownloadState, 
-        request: QWebEngineDownloadRequest, 
-        img_url: str, 
-        title: str
-    ) -> None:
-        if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
-            file_path = request.downloadDirectory() + os.sep + request.downloadFileName()
-            self.torrent_downloaded.emit(file_path, img_url, title)
-            self.accept()
+    def closeEvent(self, event) -> None:
+        self.profile.downloadRequested.disconnect(self._on_download_requested)
+        if self.web_view.page():
+            self.web_view.page().deleteLater()
+        self.web_view.setPage(None)
+        self.web_view.deleteLater()
+        super().closeEvent(event)
 
 
 class MediaCategoryDialog(QDialog):
@@ -319,7 +361,7 @@ class MediaCategoryDialog(QDialog):
         if self.btn_movie.isChecked():
             return f"movies/{self.genre_dropdown.currentText()}"
         else:
-            name = self.series_input.text().strip().lower().replace(" ", "_")
+            name = self.series_input.text().strip().replace(" ", ".")
             return f"tv-series/{name if name else 'unknown_series'}"
 
 
@@ -519,3 +561,122 @@ class FlowDetailsModal(QDialog):
 
         main_layout.addLayout(left_layout, stretch=1)
         main_layout.addLayout(right_layout, stretch=2)
+
+from PyQt6.QtWidgets import QCheckBox
+
+class DeleteTorrentDialog(QDialog):
+    def __init__(self, torrent_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Delete 1 torrent")
+        self.setFixedSize(450, 210)
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #ffffff;
+                border-radius: 12px;
+            }
+            QLabel {
+                font-family: 'Segoe UI', Arial;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Name label acting like a readonly input
+        self.lbl_name = QLabel(torrent_name)
+        self.lbl_name.setStyleSheet("""
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #334155;
+            font-size: 10pt;
+        """)
+        self.lbl_name.setWordWrap(True)
+        layout.addWidget(self.lbl_name)
+
+        # Hard drive checkbox logic
+        chk_layout = QHBoxLayout()
+        chk_layout.setSpacing(10)
+        
+        lbl_disk = QLabel("💾")
+        lbl_disk.setStyleSheet("font-size: 14pt; color: #10b981;")
+        
+        self.chk_delete_files = QCheckBox("Delete files with torrent")
+        self.chk_delete_files.setStyleSheet("""
+            QCheckBox {
+                font-size: 10pt;
+                color: #1e293b;
+                font-weight: 600;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 2px solid #cbd5e1;
+                background: #ffffff;
+                border-radius: 4px;
+            }
+            QCheckBox::indicator:checked {
+                border: 2px solid #3b82f6;
+                background: #60a5fa;
+                border-radius: 4px;
+            }
+        """)
+        chk_layout.addWidget(lbl_disk)
+        chk_layout.addWidget(self.chk_delete_files)
+        chk_layout.addStretch()
+        layout.addLayout(chk_layout)
+
+        # Warning
+        lbl_warn = QLabel("⚠️ Ticking this checkbox will delete everything contained in those torrents")
+        lbl_warn.setStyleSheet("color: #ef4444; font-size: 9pt;")
+        lbl_warn.setWordWrap(True)
+        layout.addWidget(lbl_warn)
+
+        layout.addStretch()
+
+        # Buttons
+        self.button_box = QDialogButtonBox()
+        btn_cancel = self.button_box.addButton("CANCEL", QDialogButtonBox.ButtonRole.RejectRole)
+        btn_delete = self.button_box.addButton("DELETE", QDialogButtonBox.ButtonRole.AcceptRole)
+
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #64748b;
+                border: none;
+                font-weight: bold;
+                font-size: 10pt;
+                padding: 8px 16px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #f1f5f9; }
+        """)
+        
+        btn_delete.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #ef4444;
+                border: none;
+                font-weight: bold;
+                font-size: 10pt;
+                padding: 8px 16px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #fee2e2; }
+        """)
+
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.button_box)
+        layout.addLayout(btn_layout)
+
+    def should_delete_files(self) -> bool:
+        return self.chk_delete_files.isChecked()

@@ -1,19 +1,35 @@
 import os
 from typing import List
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QScrollArea, QLabel, QLineEdit, QGraphicsBlurEffect, QDialog
+    QScrollArea, QLabel, QLineEdit, QGraphicsBlurEffect, QDialog, QApplication
 )
 
 from ui.dialogs import BrowserModalDialog, MediaCategoryDialog
 from ui.media_flow import MediaFlowWidget
+from services.filelist_auth import FilelistAuthenticator
+from PyQt6.QtWebEngineCore import QWebEngineProfile
 
 class SecureServerWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        
+        cache_dir = os.path.join(os.getcwd(), ".qt_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        self.shared_profile = QWebEngineProfile("filelist_auth", self)
+        self.shared_profile.setPersistentStoragePath(cache_dir)
+        self.shared_profile.setCachePath(cache_dir)
+        self.auth_manager = FilelistAuthenticator(self.shared_profile, self)
+        self.auth_manager.login()
+        
         self.setWindowTitle("Media Manager - Enterprise Dashboard")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.showMaximized()
+        self._is_dragging = False
+        self._drag_pos = None
         
         # Refined gradient background inspired by mockup - softer, more professional
         self.setStyleSheet("""
@@ -25,11 +41,22 @@ class SecureServerWindow(QMainWindow):
 
         self.central_w = QWidget()
         self.main_layout = QVBoxLayout(self.central_w)
-        self.main_layout.setContentsMargins(50, 35, 50, 25)
-        self.main_layout.setSpacing(25)
+        self.main_layout.setContentsMargins(0, 0, 0, 25) # Top margin 0 for flush header
+        self.main_layout.setSpacing(0)
 
-        # Top navigation bar - mockup-inspired clean design
-        nav_layout = QHBoxLayout()
+        # White Header Container
+        self.header_container = QWidget()
+        self.header_container.setStyleSheet("""
+            QWidget {
+                background-color: #ffffff;
+                border-bottom: 1px solid #e1e4e8;
+            }
+        """)
+        self.header_container.setFixedHeight(72)
+        
+        # Navigation inside the header
+        nav_layout = QHBoxLayout(self.header_container)
+        nav_layout.setContentsMargins(30, 0, 30, 0)
         nav_layout.setSpacing(18)
         
         # Add button with refined styling matching mockup
@@ -63,12 +90,13 @@ class SecureServerWindow(QMainWindow):
         self.search_bar.setMaximumWidth(480)
         self.search_bar.setStyleSheet("""
             QLineEdit { 
-                background-color: #ffffff; 
-                border: 2px solid #c8d8e8; 
-                border-radius: 24px; 
-                padding-left: 24px; 
+            QLineEdit {
+                background-color: #ffffff;
+                border: 2px solid #c8d8e8;
+                border-radius: 24px;
+                padding-left: 24px;
                 padding-right: 24px;
-                font-size: 10.5pt; 
+                font-size: 10.5pt;
                 color: #3d4f60;
             }
             QLineEdit:focus {
@@ -79,23 +107,74 @@ class SecureServerWindow(QMainWindow):
                 color: #a0b0c0;
             }
         """)
-        
+
+        # Window control buttons
+        window_controls = QHBoxLayout()
+        window_controls.setSpacing(8)
+
+        self.btn_minimize = QPushButton("🗕")
+        self.btn_maximize = QPushButton("🗗") # Initially maximized
+        self.btn_close = QPushButton("✕")
+
+        for btn in [self.btn_minimize, self.btn_maximize, self.btn_close]:
+            btn.setFixedSize(36, 36)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 18px;
+                    color: #a0b0c0;
+                    font-size: 14pt;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #f0f6fa;
+                    color: #3d4f60;
+                }
+            """)
+
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 18px;
+                color: #a0b0c0;
+                font-size: 14pt;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ffe6e6;
+                color: #ff4d4f;
+            }
+        """)
+
+        self.btn_minimize.clicked.connect(self.showMinimized)
+        self.btn_maximize.clicked.connect(self._toggle_maximize)
+        self.btn_close.clicked.connect(self.close)
+
+        window_controls.addWidget(self.btn_minimize)
+        window_controls.addWidget(self.btn_maximize)
+        window_controls.addWidget(self.btn_close)
+
         nav_layout.addWidget(self.btn_add_torrent)
         nav_layout.addStretch()
         nav_layout.addWidget(self.search_bar)
-        
-        self.main_layout.addLayout(nav_layout)
+        nav_layout.addStretch()
+        nav_layout.addLayout(window_controls)
+
+        self.main_layout.addWidget(self.header_container)
 
         # Main content container with enhanced card styling
         self.canvas_container = QWidget()
         self.canvas_container.setStyleSheet("""
-            QWidget { 
-                background-color: #ffffff; 
-                border: none;
+            QWidget {
+                background-color: #f8fbfe;
+                border-radius: 12px;
             }
         """)
         canvas_layout = QVBoxLayout(self.canvas_container)
-        canvas_layout.setContentsMargins(30, 28, 30, 28)
+        canvas_layout.setContentsMargins(50, 35, 50, 28)
         canvas_layout.setSpacing(18)
 
         # Scrollable content area with custom scrollbar
@@ -133,82 +212,6 @@ class SecureServerWindow(QMainWindow):
         
         self.scroll_area.setWidget(self.scroll_content)
         canvas_layout.addWidget(self.scroll_area)
-        
-        # Enhanced pagination controls matching mockup
-        pagination_layout = QHBoxLayout()
-        pagination_layout.setContentsMargins(12, 18, 12, 0)
-        
-        self.lbl_page = QLabel("Page 1 of 1 (Total: 0)")
-        self.lbl_page.setStyleSheet("""
-            font-size: 10.5pt; 
-            color: #2d3e50; 
-            font-weight: 600;
-            letter-spacing: -0.3px;
-        """)
-        
-        # Center navigation buttons with refined styling
-        center_nav_layout = QHBoxLayout()
-        center_nav_layout.setSpacing(12)
-        
-        self.btn_prev = QPushButton("< Previous")
-        self.btn_prev.setFixedSize(120, 40)
-        self.btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_prev.setStyleSheet("""
-            QPushButton { 
-                font-size: 10pt; 
-                color: #88a0b8; 
-                background-color: transparent; 
-                border: 2px solid #d8e4f0; 
-                border-radius: 20px;
-                font-weight: 600; 
-            }
-            QPushButton:hover {
-                background-color: #f0f6fa;
-                color: #5a7088;
-                border-color: #b8cce0;
-            }
-        """)
-        self.btn_prev.clicked.connect(self._prev_page)
-        self.btn_prev.setEnabled(False)
-
-        self.btn_next = QPushButton("Next >")
-        self.btn_next.setFixedSize(120, 40)
-        self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_next.setStyleSheet("""
-            QPushButton { 
-                font-size: 10pt; 
-                background-color: #9dc9e0; 
-                color: #0f2847; 
-                border: none;
-                border-radius: 20px; 
-                font-weight: 600;
-            } 
-            QPushButton:hover { 
-                background-color: #7db8d5; 
-                color: #081a2e; 
-            }
-        """)
-        self.btn_next.clicked.connect(self._next_page)
-        self.btn_next.setEnabled(False)
-        
-        center_nav_layout.addWidget(self.btn_prev)
-        center_nav_layout.addWidget(self.btn_next)
-
-        self.lbl_items = QLabel("10 items per page")
-        self.lbl_items.setStyleSheet("""
-            font-size: 10.5pt; 
-            color: #2d3e50; 
-            font-weight: 600;
-            letter-spacing: -0.3px;
-        """)
-
-        pagination_layout.addWidget(self.lbl_page)
-        pagination_layout.addStretch()
-        pagination_layout.addLayout(center_nav_layout)
-        pagination_layout.addStretch()
-        pagination_layout.addWidget(self.lbl_items)
-
-        canvas_layout.addLayout(pagination_layout)
         self.main_layout.addWidget(self.canvas_container)
         
         # Removed exit fullscreen button
@@ -216,98 +219,6 @@ class SecureServerWindow(QMainWindow):
         self.setCentralWidget(self.central_w)
         
         self.all_flows: List[MediaFlowWidget] = []
-        self.current_page = 0
-        self.items_per_page = 10
-
-    def _render_page(self) -> None:
-        # Clear current page
-        while self.flows_layout.count():
-            item = self.flows_layout.takeAt(0)
-            widget = item.widget()
-            if widget: 
-                widget.setParent(None)
-
-        total_items = len(self.all_flows)
-        total_pages = 1 if total_items == 0 else (total_items + self.items_per_page - 1) // self.items_per_page
-
-        if self.current_page >= total_pages:
-            self.current_page = max(0, total_pages - 1)
-
-        start_idx = self.current_page * self.items_per_page
-        end_idx = min(start_idx + self.items_per_page, total_items)
-
-        # Add flows for current page
-        for i in range(start_idx, end_idx):
-            self.flows_layout.addWidget(self.all_flows[i])
-
-        # Update pagination info
-        self.lbl_page.setText(f"Page {self.current_page + 1} of {total_pages} (Total: {total_items})")
-        
-        # Update button states with refined styling
-        self.btn_prev.setEnabled(self.current_page > 0)
-        if self.current_page > 0:
-            self.btn_prev.setStyleSheet("""
-                QPushButton { 
-                    font-size: 10pt; 
-                    color: #0f2847; 
-                    background-color: transparent; 
-                    border: 2px solid #9dc9e0; 
-                    border-radius: 20px;
-                    font-weight: 600; 
-                }
-                QPushButton:hover {
-                    background-color: #e8f4f8;
-                    color: #081a2e;
-                    border-color: #7db8d5;
-                }
-            """)
-        else:
-            self.btn_prev.setStyleSheet("""
-                QPushButton { 
-                    font-size: 10pt; 
-                    color: #88a0b8; 
-                    background-color: transparent; 
-                    border: 2px solid #d8e4f0; 
-                    border-radius: 20px;
-                    font-weight: 600; 
-                }
-            """)
-        
-        self.btn_next.setEnabled(self.current_page < total_pages - 1)
-        if self.current_page < total_pages - 1:
-            self.btn_next.setStyleSheet("""
-                QPushButton { 
-                    font-size: 10pt; 
-                    background-color: #9dc9e0; 
-                    color: #0f2847; 
-                    border: none;
-                    border-radius: 20px; 
-                    font-weight: 600;
-                } 
-                QPushButton:hover { 
-                    background-color: #7db8d5; 
-                    color: #081a2e; 
-                }
-            """)
-        else:
-            self.btn_next.setStyleSheet("""
-                QPushButton { 
-                    font-size: 10pt; 
-                    background-color: #d8e4f0; 
-                    color: #88a0b8; 
-                    border: none;
-                    border-radius: 20px; 
-                    font-weight: 600;
-                }
-            """)
-
-    def _next_page(self) -> None:
-        self.current_page += 1
-        self._render_page()
-
-    def _prev_page(self) -> None:
-        self.current_page -= 1
-        self._render_page()
 
     def _spawn_browser_modal_with_blur(self) -> None:
         # Enhanced blur effect
@@ -315,14 +226,14 @@ class SecureServerWindow(QMainWindow):
         blur_effect.setBlurRadius(25)
         self.canvas_container.setGraphicsEffect(blur_effect)
 
-        dialog = BrowserModalDialog(self)
+        dialog = BrowserModalDialog(self.shared_profile, self)
         dialog.torrent_downloaded.connect(self._process_downloaded_torrent)
         dialog.exec()
         
         # Remove blur
         self.canvas_container.setGraphicsEffect(None)
 
-    def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str) -> None:
+    def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str, season: str = "") -> None:
         try:
             blur_effect = QGraphicsBlurEffect()
             blur_effect.setBlurRadius(25)
@@ -335,13 +246,9 @@ class SecureServerWindow(QMainWindow):
                     torrent_bytes = f.read()
 
                 index = len(self.all_flows) + 1
-                flow = MediaFlowWidget(index, relative_path, torrent_bytes, img_url, title, self.scroll_content)
+                flow = MediaFlowWidget(index, relative_path, torrent_bytes, img_url, title, season, self.scroll_content)
                 self.all_flows.append(flow)
-                
-                # Jump to last page
-                total_items = len(self.all_flows)
-                self.current_page = max(0, ((total_items - 1) // self.items_per_page))
-                self._render_page()
+                self.flows_layout.addWidget(flow)
                 
         except Exception as e:
             print(f"Error instantiating pipeline: {e}")
@@ -353,4 +260,41 @@ class SecureServerWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         for flow in self.all_flows:
             flow.close_flow()
+            
+        if hasattr(self, 'shared_profile'):
+            self.shared_profile.deleteLater()
+            
         super().closeEvent(event)
+        
+        # Hard exit to completely kill Uvicorn background threads and drop Chromium locks
+        QApplication.quit()
+        os._exit(0)
+
+    def _toggle_maximize(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            self.btn_maximize.setText("🗖")
+        else:
+            self.showMaximized()
+            self.btn_maximize.setText("🗗")
+
+    def mousePressEvent(self, event) -> None:
+        from PyQt6.QtCore import Qt
+        if event.button() == Qt.MouseButton.LeftButton and event.pos().y() < 72:
+            self._is_dragging = True
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        from PyQt6.QtCore import Qt
+        if self._is_dragging and event.buttons() == Qt.MouseButton.LeftButton:
+            if self.isMaximized():
+                self.showNormal()
+                self.btn_maximize.setText("🗖")
+                self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._is_dragging = False
+        super().mouseReleaseEvent(event)
