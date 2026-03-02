@@ -38,19 +38,18 @@
     }
 
     html {
-      overflow-x: auto;
+      overflow: hidden;
     }
 
     body {
       font-family: 'Syne', sans-serif;
       background: transparent;
       color: var(--text);
-      min-height: 100vh;
+      overflow: hidden;
     }
 
     #page {
       position: relative;
-      min-width: max-content;
     }
 
     #arrows-svg {
@@ -550,20 +549,32 @@
     const SVG = document.getElementById('arrows-svg');
     const PAGE = document.getElementById('page');
 
+    let _zoom = 1, _naturalW = 0, _naturalH = 0;
+
+    // ─── Auto-fit: zoom so all 8 columns fill the viewport width ────────────────
+    function applyZoom() {
+      PAGE.style.zoom = 1;                          // reset → measure natural size
+      _naturalW = PAGE.scrollWidth;
+      _naturalH = PAGE.scrollHeight;
+      const avail = document.documentElement.clientWidth;
+      _zoom = _naturalW > avail ? avail / _naturalW : 1;
+      PAGE.style.zoom = _zoom;
+    }
+
+    // ─── Convert viewport-relative BoundingClientRect to natural CSS coords ─────
     function G(id) {
       const el = document.getElementById(id);
       if (!el) return null;
       const pg = PAGE.getBoundingClientRect();
       const er = el.getBoundingClientRect();
-      return {
-        top: er.top - pg.top + scrollY,
-        bottom: er.bottom - pg.top + scrollY,
-        left: er.left - pg.left + scrollX,
-        right: er.right - pg.left + scrollX,
-        cx: er.left - pg.left + scrollX + er.width / 2,
-        cy: er.top - pg.top + scrollY + er.height / 2,
-        w: er.width, h: er.height,
-      };
+      if (er.width === 0 || er.height === 0) return null;
+      const left = (er.left - pg.left) / _zoom;
+      const top = (er.top - pg.top) / _zoom;
+      const right = (er.right - pg.left) / _zoom;
+      const bottom = (er.bottom - pg.top) / _zoom;
+      const w = er.width / _zoom;
+      const h = er.height / _zoom;
+      return { top, bottom, left, right, cx: left + w / 2, cy: top + h / 2, w, h };
     }
 
     function mp(d, stroke, dashed, marker) {
@@ -580,21 +591,23 @@
       SVG.appendChild(p);
     }
 
-    // Column helpers
+    // Column helpers — all converted to natural space
     function colOf(id) { return document.getElementById(id).closest('.phase-col'); }
 
-    function gapCX(id) { // center X of col-gap AFTER id's column
+    function gapCX(id) {
       const gap = colOf(id).nextElementSibling;
       if (!gap) return null;
       const pg = PAGE.getBoundingClientRect();
       const gr = gap.getBoundingClientRect();
-      return (gr.left + gr.right) / 2 - pg.left + scrollX;
+      return ((gr.left + gr.right) / 2 - pg.left) / _zoom;
     }
-    function colRX(id) { // right edge X of id's column
-      return colOf(id).getBoundingClientRect().right - PAGE.getBoundingClientRect().left + scrollX;
+    function colRX(id) {
+      return (colOf(id).getBoundingClientRect().right
+        - PAGE.getBoundingClientRect().left) / _zoom;
     }
-    function colLX(id) { // left edge X of id's column
-      return colOf(id).getBoundingClientRect().left - PAGE.getBoundingClientRect().left + scrollX;
+    function colLX(id) {
+      return (colOf(id).getBoundingClientRect().left
+        - PAGE.getBoundingClientRect().left) / _zoom;
     }
 
     // ── V: straight vertical between adjacent cards (x = supplied or f.cx) ──────
@@ -668,9 +681,10 @@
     // ─────────────────────────────────────────────────────────────────────────────
     function draw() {
       [...SVG.querySelectorAll('path')].forEach(e => e.remove());
-      SVG.setAttribute('width', PAGE.scrollWidth);
-      SVG.setAttribute('height', PAGE.scrollHeight);
-      SVG.setAttribute('viewBox', `0 0 ${PAGE.scrollWidth} ${PAGE.scrollHeight}`);
+      // SVG sized to natural (pre-zoom) dimensions so coords match G() output
+      SVG.setAttribute('width', _naturalW);
+      SVG.setAttribute('height', _naturalH);
+      SVG.setAttribute('viewBox', `0 0 ${_naturalW} ${_naturalH}`);
 
       const T = 'rgba(13,148,136,.85)';
       const Y = 'rgba(217,119,6,.85)';
@@ -740,12 +754,14 @@
       V('p8-cleanup', 'p8-complete', Gr, 'm-green');
     }
 
-    // ─── Qt WebEngine / ResizeObserver Integration ─────────────────────────────────
+    // ─── Qt WebEngine / ResizeObserver Integration ───────────────────────────────
     function safeDraw() {
-      requestAnimationFrame(() => {
+      applyZoom();
+      // Double-RAF: first after style recalc, second after full layout pass
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         const testCard = document.querySelector('.sc');
         if (testCard && testCard.getBoundingClientRect().width > 0) draw();
-      });
+      }));
     }
 
     document.fonts.ready.then(() => {

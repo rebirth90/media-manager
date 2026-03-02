@@ -437,15 +437,9 @@ class MediaFlowWidget(QFrame):
         self.lbl_foldout_sub_status = QLabel("Subtitles: Unknown")
         self.lbl_foldout_db_status.setStyleSheet("font-weight: bold; color: #0f172a;")
         self.lbl_foldout_sub_status.setStyleSheet("font-weight: bold; color: #0f172a;")
-        
-        self.prog_bar_foldout_conv = QProgressBar()
-        self.prog_bar_foldout_conv.setRange(0, 100)
-        self.prog_bar_foldout_conv.setStyleSheet(self.prog_bar_conv.styleSheet())
-        self.prog_bar_foldout_conv.setFixedHeight(15)
 
         top_grid.addWidget(self.lbl_foldout_db_status, 0, 0)
         top_grid.addWidget(self.lbl_foldout_sub_status, 0, 1)
-        top_grid.addWidget(self.prog_bar_foldout_conv, 1, 0, 1, 2)
         conv_page_layout.addLayout(top_grid)
         
         from ui.conversion_flowchart import ConversionFlowViewer
