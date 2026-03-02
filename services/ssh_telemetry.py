@@ -4,7 +4,7 @@ import paramiko
 from PyQt6.QtCore import QThread, pyqtSignal
 
 class SSHTelemetryClient(QThread):
-    telemetry_data = pyqtSignal(str, str, str, int)
+    telemetry_data = pyqtSignal(str, str, int, str, str)
     error = pyqtSignal(str)
 
     def __init__(self, target_title: str, parent=None) -> None:
@@ -13,9 +13,9 @@ class SSHTelemetryClient(QThread):
         self.safe_title = re.sub(r'[\\/*?:"<>| \']', "_", self.target_title)
 
     def run(self) -> None:
-        host = os.getenv("SSH_HOST", "127.0.0.1")
-        user = os.getenv("SSH_USER", "root")
-        password = os.getenv("SSH_PASS", "toor")
+        host = os.getenv("CONVERSION_SSH_HOST", "192.168.10.109")
+        user = os.getenv("CONVERSION_SSH_USER", "root")
+        password = os.getenv("CONVERSION_SSH_PASS", "toor")
         remote_app_dir = os.getenv("REMOTE_APP_DIR", "/opt/movie-conversion")
         
         try:
@@ -23,9 +23,9 @@ class SSHTelemetryClient(QThread):
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(hostname=host, username=user, password=password, timeout=5.0)
 
-            sql_title = self.target_title.replace("'", "''")
+            sql_title = self.safe_title.replace("'", "''")
             db_cmd = f'sqlite3 {remote_app_dir}/conversion_data.db -column "SELECT status FROM jobs WHERE path LIKE \'%{sql_title}%\' ORDER BY id DESC LIMIT 1;"'
-            db_status = self._exec_cmd(client, db_cmd) or "WAITING IN QUEUE"
+            db_status = self._exec_cmd(client, db_cmd) or "NOT STARTED"
 
             gen_cmd = f'LOG=$(ls -t /var/log/conversion/general/*{self.safe_title}*.log 2>/dev/null | head -n 1); if [ -n "$LOG" ]; then cat "$LOG"; else echo "Pending..."; fi'
             full_gen_log = self._exec_cmd(client, gen_cmd)
@@ -36,9 +36,17 @@ class SSHTelemetryClient(QThread):
             ff_full_cmd = f'LOG=$(ls -t /var/log/conversion/ffmpeg/*{self.safe_title}*.log 2>/dev/null | head -n 1); if [ -n "$LOG" ]; then cat "$LOG"; fi'
             ff_full_log = self._exec_cmd(client, ff_full_cmd)
             prog = self._calculate_conversion_progress(ff_full_log)
+            
+            sub_status = "Pending"
+            if "Extracting subtitles" in full_gen_log:
+                sub_status = "In Progress"
+            if "Extracted" in full_gen_log or "Converted" in full_gen_log:
+                sub_status = "Completed"
+            if "No subtitles found" in full_gen_log:
+                sub_status = "None"
 
             client.close()
-            self.telemetry_data.emit(db_status, full_gen_log, ff_tail, prog)
+            self.telemetry_data.emit(db_status, sub_status, prog, full_gen_log, ff_tail)
         except Exception as e:
             self.error.emit(f"SSH Telemetry Failed: {str(e)}")
 

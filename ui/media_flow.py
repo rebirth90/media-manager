@@ -10,6 +10,23 @@ from workers.tmdb_fetcher import TMDBFetcherThread
 from services.qbittorrent import QBittorrentClient
 from services.ssh_telemetry import SSHTelemetryClient
 from ui.dialogs import FlowDetailsModal
+from PyQt6.QtCore import pyqtSignal, QThread
+
+class QueueAppenderThread(QThread):
+    finished_appending = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, target_path: str, parent=None):
+        super().__init__(parent)
+        self.target_path = target_path
+
+    def run(self):
+        try:
+            with open(r"\\192.168.20.102\Media\conversion.txt", "a", encoding="utf-8") as f:
+                f.write(self.target_path + "\n")
+            self.finished_appending.emit()
+        except Exception as e:
+            self.error.emit(str(e))
 
 class MediaFlowWidget(QFrame):
     def __init__(self, index: int, relative_path: str, torrent_bytes: bytes, image_url: str, title: str, season: str = "", parent=None):
@@ -236,6 +253,19 @@ class MediaFlowWidget(QFrame):
         
         self.conv_layout.addWidget(self.lbl_conv_state_val)
         self.conv_layout.addWidget(self.prog_bar_conv)
+
+        self.btn_send_conv = QPushButton("Send to Conversion")
+        self.btn_send_conv.setStyleSheet("""
+            QPushButton {
+                background-color: #2563eb; color: white; border-radius: 4px; padding: 4px 8px; font-weight: bold; font-size: 8pt;
+            }
+            QPushButton:hover { background-color: #1d4ed8; }
+        """)
+        self.btn_send_conv.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_conv.clicked.connect(self._send_to_conversion)
+        self.btn_send_conv.hide()
+        self.conv_layout.addWidget(self.btn_send_conv)
+
         self.btn_trash_row = QPushButton()
         from PyQt6.QtGui import QIcon
         from PyQt6.QtCore import QSize
@@ -397,6 +427,45 @@ class MediaFlowWidget(QFrame):
         
         # PAGE 2: Conversion
         self.page_conv = QWidget()
+        conv_page_layout = QVBoxLayout(self.page_conv)
+        conv_page_layout.setContentsMargins(16, 16, 16, 16)
+        conv_page_layout.setSpacing(10)
+
+        top_grid = QGridLayout()
+        self.lbl_foldout_db_status = QLabel("Conversion Status: Unknown")
+        self.lbl_foldout_sub_status = QLabel("Subtitles: Unknown")
+        self.lbl_foldout_db_status.setStyleSheet("font-weight: bold; color: #0f172a;")
+        self.lbl_foldout_sub_status.setStyleSheet("font-weight: bold; color: #0f172a;")
+        
+        self.prog_bar_foldout_conv = QProgressBar()
+        self.prog_bar_foldout_conv.setRange(0, 100)
+        self.prog_bar_foldout_conv.setStyleSheet(self.prog_bar_conv.styleSheet())
+        self.prog_bar_foldout_conv.setFixedHeight(15)
+
+        top_grid.addWidget(self.lbl_foldout_db_status, 0, 0)
+        top_grid.addWidget(self.lbl_foldout_sub_status, 0, 1)
+        top_grid.addWidget(self.prog_bar_foldout_conv, 1, 0, 1, 2)
+        conv_page_layout.addLayout(top_grid)
+        
+        from ui.conversion_flowchart import ConversionFlowViewer
+        self.flowchart_view = ConversionFlowViewer()
+        conv_page_layout.addWidget(self.flowchart_view)
+
+        from PyQt6.QtWidgets import QSplitter, QTextEdit
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        self.txt_gen_log = QTextEdit()
+        self.txt_gen_log.setReadOnly(True)
+        self.txt_gen_log.setStyleSheet("background-color: #1e1e1e; color: #10b981; font-family: 'Courier New', monospace; font-size: 9pt;")
+        
+        self.txt_ff_tail = QTextEdit()
+        self.txt_ff_tail.setReadOnly(True)
+        self.txt_ff_tail.setStyleSheet("background-color: #1e1e1e; color: #9ca3af; font-family: 'Courier New', monospace; font-size: 9pt;")
+
+        splitter.addWidget(self.txt_gen_log)
+        splitter.addWidget(self.txt_ff_tail)
+        conv_page_layout.addWidget(splitter)
+        
         self.foldout_stack.addWidget(self.page_conv)
         
         self.main_layout.addWidget(self.details_foldout_container)
@@ -446,7 +515,7 @@ class MediaFlowWidget(QFrame):
             # Animate open if it was closed
             if self.details_foldout_container.height() == 0:
                 self.foldout_anim.setStartValue(0)
-                self.foldout_anim.setEndValue(350) # Fallback max height bounds
+                self.foldout_anim.setEndValue(550) # Increased max height bounds for detailed timeline flowchart
                 self.foldout_anim.start()
             
             self.main_card_container.setStyleSheet("""
@@ -634,32 +703,59 @@ class MediaFlowWidget(QFrame):
         self.ssh_worker.telemetry_data.connect(self._update_telemetry_ui)
         self.ssh_worker.start()
 
-    def _update_telemetry_ui(self, db_status: str, gen_out: str, ff_out: str, prog: int) -> None:
+    def _send_to_conversion(self):
+        target_path = self.relative_path.replace("\\", "/") # Linux consistent path
+        self.queue_thread = QueueAppenderThread(target_path, self)
+        self.queue_thread.finished_appending.connect(lambda: self.btn_send_conv.setText("Sent ✓"))
+        self.queue_thread.finished_appending.connect(lambda: self.btn_send_conv.setEnabled(False))
+        self.queue_thread.error.connect(lambda err: self.btn_send_conv.setText("Error!"))
+        self.queue_thread.start()
+        self.btn_send_conv.setEnabled(False)
+        self.btn_send_conv.setText("Sending...")
+
+    def _update_telemetry_ui(self, db_status: str, sub_status: str, prog: int, gen_out: str, ff_out: str) -> None:
         self._active_qbit_state = f"DB Status: {db_status}"
         self._active_ffmpeg_log = ff_out
         
         self.lbl_conv_state_val.setText(db_status)
-        self.prog_bar_conv.setValue(prog)
+        self.lbl_foldout_db_status.setText(f"Conversion Status: {db_status}")
+        self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
+        self.prog_bar_conv.setValue(prog)
+        self.prog_bar_foldout_conv.setValue(prog)
+
+        if hasattr(self, 'txt_gen_log'):
+            self.txt_gen_log.setPlainText(gen_out)
+            self.txt_ff_tail.setPlainText(ff_out)
+
+        # Update Progress Bar styling based on status
+        base_style = "QProgressBar { background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; color: white; font-weight: bold; font-size: 8pt; }"
         if prog >= 100 or db_status.upper() == "COMPLETED":
             self.prog_bar_conv.setValue(100)
-            self.prog_bar_conv.setStyleSheet("""
-                QProgressBar {
-                    background-color: #f1f5f9;
-                    border: 1px solid #cbd5e1;
-                    border-radius: 4px;
-                    text-align: center;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 8pt;
-                }
-                QProgressBar::chunk {
-                    background-color: #10b981;
-                    border-radius: 3px;
-                }
-            """)
+            self.prog_bar_foldout_conv.setValue(100)
+            comp_style = base_style + " QProgressBar::chunk { background-color: #10b981; border-radius: 3px; }"
+            self.prog_bar_conv.setStyleSheet(comp_style)
+            self.prog_bar_foldout_conv.setStyleSheet(comp_style)
             if hasattr(self, 'ssh_timer'): 
                 self.ssh_timer.stop()
+        elif db_status.upper() == "FAILED":
+            fail_style = base_style + " QProgressBar::chunk { background-color: #ef4444; border-radius: 3px; }"
+            self.prog_bar_conv.setStyleSheet(fail_style)
+            self.prog_bar_foldout_conv.setStyleSheet(fail_style)
+        else:
+            proc_style = base_style + " QProgressBar::chunk { background-color: #3b82f6; border-radius: 3px; }"
+            self.prog_bar_conv.setStyleSheet(proc_style)
+            self.prog_bar_foldout_conv.setStyleSheet(proc_style)
+
+        # Determine Send button visibility
+        if db_status.upper() == "NOT STARTED" and hasattr(self, 'lbl_state_val') and "Done" in self.lbl_state_val.text():
+            self.btn_send_conv.show()
+            self.lbl_conv_state_val.hide()
+            self.prog_bar_conv.hide()
+        else:
+            self.btn_send_conv.hide()
+            self.lbl_conv_state_val.show()
+            self.prog_bar_conv.show()
 
     def _format_size(self, bytes_size: int) -> str:
         if bytes_size == 0: return "0 B"
