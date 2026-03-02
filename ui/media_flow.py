@@ -452,22 +452,8 @@ class MediaFlowWidget(QFrame):
         self.flowchart_view = ConversionFlowViewer()
         conv_page_layout.addWidget(self.flowchart_view)
 
-        from PyQt6.QtWidgets import QSplitter, QTextEdit
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        self.txt_gen_log = QTextEdit()
-        self.txt_gen_log.setReadOnly(True)
-        self.txt_gen_log.setStyleSheet("background-color: #1e1e1e; color: #10b981; font-family: 'Courier New', monospace; font-size: 9pt;")
-        
-        self.txt_ff_tail = QTextEdit()
-        self.txt_ff_tail.setReadOnly(True)
-        self.txt_ff_tail.setStyleSheet("background-color: #1e1e1e; color: #9ca3af; font-family: 'Courier New', monospace; font-size: 9pt;")
-
-        splitter.addWidget(self.txt_gen_log)
-        splitter.addWidget(self.txt_ff_tail)
-        conv_page_layout.addWidget(splitter)
-        
         self.foldout_stack.addWidget(self.page_conv)
+
         
         self.main_layout.addWidget(self.details_foldout_container)
 
@@ -516,7 +502,7 @@ class MediaFlowWidget(QFrame):
             # Animate open if it was closed
             if self.details_foldout_container.height() == 0:
                 self.foldout_anim.setStartValue(0)
-                self.foldout_anim.setEndValue(550) # Increased max height bounds for detailed timeline flowchart
+                self.foldout_anim.setEndValue(600)  # Tall enough for WebEngine pipeline view
                 self.foldout_anim.start()
             
             self.main_card_container.setStyleSheet("""

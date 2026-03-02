@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Manager Pipeline</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;800&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      /* Light theme variables */
+      --bg: #ffffff;
+      --card: #ffffff;
+      --teal: #0d9488;
+      /* Darker teal for contrast */
+      --yellow: #d97706;
+      /* Amber/dark yellow */
+      --red: #e11d48;
+      /* Deep red */
+      --green: #16a34a;
+      /* Darker green */
+      --purple: #9333ea;
+      /* Deep purple */
+      --text: #1e293b;
+      /* Slate dark gray */
+      --muted: #64748b;
+      /* Slate medium gray */
+    }
+
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      overflow-x: auto;
+    }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background: transparent;
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    #page {
+      position: relative;
+      min-width: max-content;
+    }
+
+    #arrows-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      z-index: 10;
+      overflow: visible;
+    }
+
+    /* ── TRACK ── */
+    .tl-outer {
+      padding: 0 60px 20px;
+    }
+
+    /* Reduced bottom space */
+    .tl-track {
+      display: flex;
+      align-items: flex-start;
+      position: relative;
+      margin-top: 10px;
+    }
+
+    /* 10px from top */
+    .spine {
+      position: absolute;
+      top: 43px;
+      left: 30px;
+      right: 30px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent 0%, rgba(13, 148, 136, .2) 4%, rgba(13, 148, 136, .2) 96%, transparent 100%);
+      z-index: 0;
+    }
+
+    /* ── COLUMN ── */
+    .phase-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 220px;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* col-gap is the routing lane between columns — 80px wide */
+    .col-gap {
+      width: 80px;
+      flex-shrink: 0;
+    }
+
+    /* ── NODE ── */
+    .phase-node {
+      width: 86px;
+      height: 86px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      background: var(--card);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 3;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+
+    .ph-icon {
+      font-size: .95rem;
+      margin-bottom: 1px;
+    }
+
+    .ph-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .ph-lbl {
+      font-size: .58rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      margin-top: 2px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--muted);
+    }
+
+    .col-teal .phase-node {
+      border-color: rgba(13, 148, 136, .4);
+    }
+
+    .col-teal .ph-num {
+      color: var(--teal);
+    }
+
+    .col-yellow .phase-node {
+      border-color: rgba(217, 119, 6, .4);
+    }
+
+    .col-yellow .ph-num {
+      color: var(--yellow);
+    }
+
+    .col-purple .phase-node {
+      border-color: rgba(147, 51, 234, .4);
+    }
+
+    .col-purple .ph-num {
+      color: var(--purple);
+    }
+
+    .col-green .phase-node {
+      border-color: rgba(22, 163, 74, .4);
+    }
+
+    .col-green .ph-num {
+      color: var(--green);
+    }
+
+    .node-to-panel {
+      width: 2px;
+      height: 22px;
+      background: linear-gradient(180deg, rgba(13, 148, 136, .3), transparent);
+      flex-shrink: 0;
+    }
+
+    /* ── PANEL — transparent ── */
+    .phase-panel {
+      width: 210px;
+      flex-shrink: 0;
+    }
+
+    .panel-body {
+      display: flex;
+      flex-direction: column;
+      gap: 2.8rem;
+    }
+
+    /* ── CARDS ── */
+    .sc {
+      background: rgba(0, 0, 0, .03);
+      border-radius: 8px;
+      padding: .6rem .7rem;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .sc-title {
+      font-size: .72rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: .3rem;
+      margin-bottom: .28rem;
+    }
+
+    .sc-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .sc-body {
+      font-size: .67rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .code {
+      background: rgba(13, 148, 136, .1);
+      color: var(--teal);
+      padding: .05rem .25rem;
+      border-radius: 3px;
+      font-size: .62rem;
+      font-weight: 600;
+    }
+
+    .sc.teal {
+      border-left: 2px solid rgba(13, 148, 136, .5);
+    }
+
+    .sc.teal .sc-title {
+      color: var(--teal);
+    }
+
+    .sc.teal .sc-dot {
+      background: var(--teal);
+    }
+
+    .sc.yellow {
+      border-left: 2px solid rgba(217, 119, 6, .5);
+    }
+
+    .sc.yellow.sc-title {
+      color: var(--yellow);
+    }
+
+    .sc.yellow .sc-dot {
+      background: var(--yellow);
+    }
+
+    .sc.red {
+      border-left: 2px solid rgba(225, 29, 72, .5);
+    }
+
+    .sc.red .sc-title {
+      color: var(--red);
+    }
+
+    .sc.red .sc-dot {
+      background: var(--red);
+    }
+
+    .sc.green {
+      border-left: 2px solid rgba(22, 163, 74, .5);
+    }
+
+    .sc.green .sc-title {
+      color: var(--green);
+    }
+
+    .sc.green .sc-dot {
+      background: var(--green);
+    }
+
+    .sc.purple {
+      border-left: 2px solid rgba(147, 51, 234, .5);
+    }
+
+    .sc.purple .sc-title {
+      color: var(--purple);
+    }
+
+    .sc.purple.sc-dot {
+      background: var(--purple);
+    }
+
+    .branch-row {
+      display: flex;
+      gap: .4rem;
+    }
+
+    .branch-row .sc {
+      flex: 1;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="page">
+    <svg id="arrows-svg">
+      <defs>
+        <marker id="m-teal" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(13,148,136,.9)" />
+        </marker>
+        <marker id="m-red" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(225,29,72,.9)" />
+        </marker>
+        <marker id="m-yellow" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(217,119,6,.9)" />
+        </marker>
+        <marker id="m-green" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(22,163,74,.9)" />
+        </marker>
+        <marker id="m-purple" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(147,51,234,.9)" />
+        </marker>
+      </defs>
+    </svg>
+
+    <div class="tl-outer">
+      <div class="tl-track" id="track">
+        <div class="spine"></div>
+
+        <div class="phase-col col-teal" id="col-1">
+          <div class="phase-node"><span class="ph-icon">📥</span><span class="ph-num">01</span><span
+              class="ph-lbl">Ingest</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p1-input">
+                <div class="sc-title"><span class="sc-dot"></span>User Input</div>
+                <div class="sc-body">Add media path to <span class="code">conversion.txt</span></div>
+              </div>
+              <div class="sc teal" id="p1-queue">
+                <div class="sc-title"><span class="sc-dot"></span>Queue Management</div>
+                <div class="sc-body">DatabaseManager reads file<br>Adds to SQLite as <span class="code">PENDING</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-1-2"></div>
+
+        <div class="phase-col col-teal" id="col-2">
+          <div class="phase-node"><span class="ph-icon">⚙️</span><span class="ph-num">02</span><span
+              class="ph-lbl">Worker</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p2-dequeue">
+                <div class="sc-title"><span class="sc-dot"></span>Job Dequeue</div>
+                <div class="sc-body"><span class="code">PENDING</span> → <span class="code">PROCESSING</span></div>
+              </div>
+              <div class="sc red" id="p2-fail">
+                <div class="sc-title"><span class="sc-dot"></span>Path Validation — FAIL</div>
+                <div class="sc-body">Rejects <span class="code">/share/seeding</span><br>Marks <span
+                    class="code">FAILED</span></div>
+              </div>
+              <div class="sc teal" id="p2-pass">
+                <div class="sc-title"><span class="sc-dot"></span>Path Validation — PASS</div>
+                <div class="sc-body">Path accepted, proceed</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-2-3"></div>
+
+        <div class="phase-col col-yellow" id="col-3">
+          <div class="phase-node"><span class="ph-icon">🔀</span><span class="ph-num">03</span><span
+              class="ph-lbl">Type</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc yellow" id="p3-router">
+                <div class="sc-title"><span class="sc-dot"></span>Media Type Router</div>
+                <div class="sc-body">Analyse base path</div>
+              </div>
+              <div class="branch-row">
+                <div class="sc green" id="p3-movie">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>MOVIE
+                  </div>
+                  <div class="sc-body"><span class="code">movies_root</span></div>
+                </div>
+                <div class="sc yellow" id="p3-tv">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>TV</div>
+                  <div class="sc-body"><span class="code">tv_root</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-3-4"></div>
+
+        <div class="phase-col col-purple" id="col-4">
+          <div class="phase-node"><span class="ph-icon">🏭</span><span class="ph-num">04</span><span
+              class="ph-lbl">Factory</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc green" id="p4-movie">
+                <div class="sc-title"><span class="sc-dot"></span>Movie Processing</div>
+                <div class="sc-body">Dir → largest file → Movie object<br>File → single Movie object
+                </div>
+              </div>
+              <div class="sc yellow" id="p4-tv">
+                <div class="sc-title"><span class="sc-dot"></span>TV Series Processing</div>
+                <div class="sc-body">Dir → scan <span class="code">.mkv .mp4</span><br>→ TVEpisode
+                  objects</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-4-5"></div>
+
+        <div class="phase-col col-yellow" id="col-5">
+          <div class="phase-node"><span class="ph-icon">🔍</span><span class="ph-num">05</span><span
+              class="ph-lbl">Check</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc yellow" id="p5-check">
+                <div class="sc-title"><span class="sc-dot"></span>MP4 Existence Check</div>
+                <div class="sc-body">Does target <span class="code">.mp4</span> exist?</div>
+              </div>
+              <div class="sc red" id="p5-fail">
+                <div class="sc-title"><span class="sc-dot"></span>EXISTS → Fast Fail</div>
+                <div class="sc-body">Skip encode · clean source<br>Mark <span class="code">COMPLETE</span></div>
+              </div>
+              <div class="sc teal" id="p5-pass">
+                <div class="sc-title"><span class="sc-dot"></span>NOT EXISTS → Continue</div>
+                <div class="sc-body">Proceed to pipeline</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-5-6"></div>
+
+        <div class="phase-col col-purple" id="col-6">
+          <div class="phase-node"><span class="ph-icon">💬</span><span class="ph-num">06</span><span
+              class="ph-lbl">Subs</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc purple" id="p6-discovery">
+                <div class="sc-title"><span class="sc-dot"></span>Subtitle Discovery</div>
+                <div class="sc-body">Find external OR extract embedded</div>
+              </div>
+              <div class="sc purple" id="p6-vobsub">
+                <div class="sc-title"><span class="sc-dot"></span>Binary VobSub</div>
+                <div class="sc-body"><span class="code">.idx</span> / MPEG-PS header<br>Keep <span
+                    class="code">.sub/.idx</span></div>
+              </div>
+              <div class="sc purple" id="p6-text">
+                <div class="sc-title"><span class="sc-dot"></span>Text Subtitles</div>
+                <div class="sc-body"><span class="code">.srt .ass</span> MicroDVD<br>Force UTF-8 · RO
+                  char rules</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-6-7"></div>
+
+        <div class="phase-col col-teal" id="col-7">
+          <div class="phase-node"><span class="ph-icon">🎞️</span><span class="ph-num">07</span><span
+              class="ph-lbl">Encode</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p7-heuristics">
+                <div class="sc-title"><span class="sc-dot"></span>Heuristics Check</div>
+                <div class="sc-body">Query DB for last successful params</div>
+              </div>
+              <div class="sc purple" id="p7-audio">
+                <div class="sc-title"><span class="sc-dot"></span>Audio Processing</div>
+                <div class="sc-body">5.1/7.1 → 256k · Stereo → 192k</div>
+              </div>
+              <div class="sc purple" id="p7-tiers">
+                <div class="sc-title"><span class="sc-dot"></span>Tiered Fallback Loop</div>
+                <div class="sc-body">
+                  Tier 1: <span class="code">bf=7 lad=40 async=8</span><br>
+                  Tier 2: <span class="code">bf=4 lad=20 async=4</span><br>
+                  Tier 3: <span class="code">bf=0 lad=10 async=2</span>
+                </div>
+              </div>
+              <div class="sc yellow" id="p7-outcome">
+                <div class="sc-title"><span class="sc-dot"></span>Outcome Handler</div>
+                <div class="sc-body"><span style="color:var(--green)">Success</span> → save to
+                  DB<br><span style="color:var(--red)">Failure</span> → del temp · next tier</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-7-8"></div>
+
+        <div class="phase-col col-green" id="col-8">
+          <div class="phase-node"><span class="ph-icon">✅</span><span class="ph-num">08</span><span
+              class="ph-lbl">Final</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p8-relocate">
+                <div class="sc-title"><span class="sc-dot"></span>File Relocation</div>
+                <div class="sc-body">Move encoded <span class="code">.mp4</span> + subtitles</div>
+              </div>
+              <div class="branch-row">
+                <div class="sc green" id="p8-movie">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>Movies
+                  </div>
+                  <div class="sc-body"><span class="code">/archive/movies/</span></div>
+                </div>
+                <div class="sc yellow" id="p8-tv">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>TV</div>
+                  <div class="sc-body"><span class="code">/archive/tv/</span></div>
+                </div>
+              </div>
+              <div class="sc teal" id="p8-cleanup">
+                <div class="sc-title"><span class="sc-dot"></span>Source Cleanup</div>
+                <div class="sc-body">Delete original · remove empty dirs</div>
+              </div>
+              <div class="sc green" id="p8-complete">
+                <div class="sc-title"><span class="sc-dot"></span>✓ Job Complete</div>
+                <div class="sc-body">Status: <span class="code">COMPLETED</span><br>Log metrics</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <script>
+    // ─── ROUTING ENGINE ──────────────────────────────────────────────────────────
+
+    const SVG = document.getElementById('arrows-svg');
+    const PAGE = document.getElementById('page');
+
+    function G(id) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      const pg = PAGE.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      return {
+        top: er.top - pg.top + scrollY,
+        bottom: er.bottom - pg.top + scrollY,
+        left: er.left - pg.left + scrollX,
+        right: er.right - pg.left + scrollX,
+        cx: er.left - pg.left + scrollX + er.width / 2,
+        cy: er.top - pg.top + scrollY + er.height / 2,
+        w: er.width, h: er.height,
+      };
+    }
+
+    function mp(d, stroke, dashed, marker) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const p = document.createElementNS(ns, 'path');
+      p.setAttribute('d', d);
+      p.setAttribute('stroke', stroke);
+      p.setAttribute('stroke-width', '1.6px');
+      p.setAttribute('fill', 'none');
+      p.setAttribute('stroke-linecap', 'square');
+      p.setAttribute('stroke-linejoin', 'miter');
+      if (dashed) p.setAttribute('stroke-dasharray', '5 4');
+      if (marker) p.setAttribute('marker-end', `url(#${marker})`);
+      SVG.appendChild(p);
+    }
+
+    // Column helpers
+    function colOf(id) { return document.getElementById(id).closest('.phase-col'); }
+
+    function gapCX(id) { // center X of col-gap AFTER id's column
+      const gap = colOf(id).nextElementSibling;
+      if (!gap) return null;
+      const pg = PAGE.getBoundingClientRect();
+      const gr = gap.getBoundingClientRect();
+      return (gr.left + gr.right) / 2 - pg.left + scrollX;
+    }
+    function colRX(id) { // right edge X of id's column
+      return colOf(id).getBoundingClientRect().right - PAGE.getBoundingClientRect().left + scrollX;
+    }
+    function colLX(id) { // left edge X of id's column
+      return colOf(id).getBoundingClientRect().left - PAGE.getBoundingClientRect().left + scrollX;
+    }
+
+    // ── V: straight vertical between adjacent cards (x = supplied or f.cx) ──────
+    function V(fromId, toId, c, m, x) {
+      const f = G(fromId), t = G(toId);
+      if (!f || !t) return;
+      const px = (x !== undefined) ? x : f.cx;
+      mp(`M ${px} ${f.bottom + 4} L ${px} ${t.top - 7}`, c, false, m);
+    }
+
+    // ── FWD: inter-column forward arrow ──────────────────────────────────────────
+    function FWD(fromId, toId, c, m, gapOff, yFromFrac, yToFrac, exitSide) {
+      const f = G(fromId), t = G(toId);
+      if (!f || !t) return;
+      const gx = gapCX(fromId) + (gapOff || 0);
+      const yE = t.top + t.h * (yToFrac !== undefined ? yToFrac : 0.5);
+
+      if (exitSide === 'bottom') {
+        const yS = f.bottom + 10;
+        mp(`M ${f.cx} ${f.bottom + 2} L ${f.cx} ${yS} L ${gx} ${yS} L ${gx} ${yE} L ${t.left - 2} ${yE}`, c, false, m);
+      } else {
+        const yS = f.top + f.h * (yFromFrac !== undefined ? yFromFrac : 0.5);
+        mp(`M ${f.right + 2} ${yS} L ${gx} ${yS} L ${gx} ${yE} L ${t.left - 2} ${yE}`, c, false, m);
+      }
+    }
+
+    // ── SKIP: same-col non-adjacent, routes via right gutter ─────────────────────
+    function SKIP(fromId, toId, c, m, gOff) {
+      const f = G(fromId), t = G(toId);
+      if (!f || !t) return;
+      const gx = colRX(fromId) + 10 + (gOff || 0);
+      mp(`M ${f.right + 2} ${f.cy} L ${gx} ${f.cy} L ${gx} ${t.top - 14} L ${t.cx} ${t.top - 14} L ${t.cx} ${t.top - 2}`, c, false, m);
+    }
+
+    // ── LOOP_UP: same-col loop back (target ABOVE source), dashed ────────────────
+    // Height fixed to t.top - 22 to match the LOOP_BACK height
+    function LOOP_UP(fromId, toId, c, m, xOff) {
+      const f = G(fromId), t = G(toId);
+      if (!f || !t) return;
+      const gx = colRX(fromId) + 26;
+      const tx = t.cx + (xOff || 0); // Apply custom target X offset
+      mp(`M ${f.right + 2} ${f.cy} L ${gx} ${f.cy} L ${gx} ${t.top - 22} L ${tx} ${t.top - 22} L ${tx} ${t.top - 2}`, c, true, m);
+    }
+
+    // ── LOOP_BACK: cross-col backward, dashed ────────────────────────────────────
+    function LOOP_BACK(fromId, toId, c, m, laneOff, xOff) {
+      const f = G(fromId), t = G(toId);
+      if (!f || !t) return;
+
+      let maxB = 0;
+      document.querySelectorAll('.sc').forEach(sc => {
+        const r = sc.getBoundingClientRect();
+        const pgr = PAGE.getBoundingClientRect();
+        const left = r.left - pgr.left + scrollX;
+        const right = r.right - pgr.left + scrollX;
+
+        if (right >= t.left - 20 && left <= f.right + 20) {
+          const b = r.bottom - pgr.top + scrollY;
+          if (b > maxB) maxB = b;
+        }
+      });
+
+      const laneY = maxB + 24 + (laneOff || 0) * 18;
+      const rx = colRX(fromId) + 26;
+      const lx = colLX(toId) - 18;
+      const tx = t.cx + (xOff || 0); // Apply custom target X offset
+
+      mp(`M ${f.right + 2} ${f.cy} L ${rx} ${f.cy} L ${rx} ${laneY} L ${lx} ${laneY} L ${lx} ${t.top - 22} L ${tx} ${t.top - 22} L ${tx} ${t.top - 2}`, c, true, m);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    function draw() {
+      [...SVG.querySelectorAll('path')].forEach(e => e.remove());
+      SVG.setAttribute('width', PAGE.scrollWidth);
+      SVG.setAttribute('height', PAGE.scrollHeight);
+      SVG.setAttribute('viewBox', `0 0 ${PAGE.scrollWidth} ${PAGE.scrollHeight}`);
+
+      const T = 'rgba(13,148,136,.85)';
+      const Y = 'rgba(217,119,6,.85)';
+      const Re = 'rgba(225,29,72,.85)';
+      const Gr = 'rgba(22,163,74,.85)';
+      const Pu = 'rgba(147,51,234,.85)';
+
+      // ── Phase 1 ────────────────────────────────────────────────────────────────
+      V('p1-input', 'p1-queue', T, 'm-teal');
+
+      // ── Phase 1 → 2 ────────────────────────────────────────────────────────────
+      FWD('p1-queue', 'p2-dequeue', T, 'm-teal');
+
+      // ── Phase 2 ────────────────────────────────────────────────────────────────
+      V('p2-dequeue', 'p2-fail', Re, 'm-red');
+      SKIP('p2-dequeue', 'p2-pass', T, 'm-teal');
+      // Loop up enters 15px to the RIGHT of the center vertical line
+      LOOP_UP('p2-fail', 'p2-dequeue', Re, 'm-red', 15);
+
+      // ── Phase 2 → 3 ────────────────────────────────────────────────────────────
+      FWD('p2-pass', 'p3-router', T, 'm-teal');
+
+      // ── Phase 3 ────────────────────────────────────────────────────────────────
+      const m3 = G('p3-movie'), tv3 = G('p3-tv');
+      V('p3-router', 'p3-movie', Gr, 'm-green', m3.cx);
+      V('p3-router', 'p3-tv', Y, 'm-yellow', tv3.cx);
+
+      // ── Phase 3 → 4 ────────────────────────────────────────────────────────────
+      FWD('p3-movie', 'p4-movie', Gr, 'm-green', -8, 0.5, 0.35, 'bottom');
+      FWD('p3-tv', 'p4-tv', Y, 'm-yellow', 8, 0.5, 0.65);
+
+      // ── Phase 4 → 5 ────────────────────────────────────────────────────────────
+      FWD('p4-movie', 'p5-check', Gr, 'm-green', -8, 0.5, 0.32);
+      FWD('p4-tv', 'p5-check', Y, 'm-yellow', 8, 0.5, 0.68);
+
+      // ── Phase 5 ────────────────────────────────────────────────────────────────
+      V('p5-check', 'p5-fail', Re, 'm-red');
+      SKIP('p5-check', 'p5-pass', T, 'm-teal');
+      // Loop back enters 15px to the LEFT of the center vertical line
+      LOOP_BACK('p5-fail', 'p2-dequeue', Re, 'm-red', 0, -15);
+
+      // ── Phase 5 → 6 ────────────────────────────────────────────────────────────
+      FWD('p5-pass', 'p6-discovery', T, 'm-teal');
+
+      // ── Phase 6 ────────────────────────────────────────────────────────────────
+      V('p6-discovery', 'p6-vobsub', Pu, 'm-purple');
+      SKIP('p6-discovery', 'p6-text', Pu, 'm-purple');
+
+      // ── Phase 6 → 7 ────────────────────────────────────────────────────────────
+      FWD('p6-vobsub', 'p7-heuristics', Pu, 'm-purple', -8, 0.5, 0.32);
+      FWD('p6-text', 'p7-heuristics', Pu, 'm-purple', 8, 0.5, 0.68);
+
+      // ── Phase 7 ────────────────────────────────────────────────────────────────
+      V('p7-heuristics', 'p7-audio', T, 'm-teal');
+      V('p7-audio', 'p7-tiers', Pu, 'm-purple');
+      V('p7-tiers', 'p7-outcome', Y, 'm-yellow');
+
+      // ── Phase 7 → 8 ────────────────────────────────────────────────────────────
+      FWD('p7-outcome', 'p8-relocate', T, 'm-teal');
+
+      // ── Phase 8 ────────────────────────────────────────────────────────────────
+      const m8 = G('p8-movie'), tv8 = G('p8-tv');
+      V('p8-relocate', 'p8-movie', Gr, 'm-green', m8.cx);
+      V('p8-relocate', 'p8-tv', Y, 'm-yellow', tv8.cx);
+      V('p8-movie', 'p8-cleanup', Gr, 'm-green', m8.cx);
+      V('p8-tv', 'p8-cleanup', Y, 'm-yellow', tv8.cx);
+      V('p8-cleanup', 'p8-complete', Gr, 'm-green');
+    }
+
+    // ─── Qt WebEngine / ResizeObserver Integration ─────────────────────────────────
+    function safeDraw() {
+      requestAnimationFrame(() => {
+        const testCard = document.querySelector('.sc');
+        if (testCard && testCard.getBoundingClientRect().width > 0) draw();
+      });
+    }
+
+    document.fonts.ready.then(() => {
+      safeDraw();
+      const ro = new ResizeObserver(safeDraw);
+      ro.observe(PAGE);
+      ro.observe(document.body);
+    });
+
+    window.addEventListener('resize', safeDraw);
+    setTimeout(safeDraw, 300);
+  </script>
+</body>
+
+</html>

@@ -275,49 +275,42 @@ def make_tier_box(children, light=False):
         lay.addWidget(c)
     return w
 
-class ConversionFlowViewer(QScrollArea):
-    """Embeddable flowchart widget (light theme) for use inside other layouts."""
+class ConversionFlowViewer(QWidget):
+    """Embeds the HTML pipeline visualization via QWebEngineView."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWidgetResizable(True)
-        self.setStyleSheet(
-            "QScrollArea { border: none; background-color: #f1f4f8; }"
-            "QScrollBar:horizontal { height: 8px; background: #e2e8f0; border-radius: 4px; }"
-            "QScrollBar::handle:horizontal { background: #94a3b8; border-radius: 4px; min-width: 30px; }"
-            "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
-        )
-        self.setFixedHeight(300)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        import os
+        from PyQt6.QtWidgets import QSizePolicy
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtWebEngineCore import QWebEngineSettings
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QColor
 
-        # Switch to light palette before building
-        self._apply_light_palette()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
 
-        global main_widget, main_layout
-        main_widget = FlowWidget(bg_color=_LIGHT_BG, spine_color="#94a3b8")
-        main_layout = QHBoxLayout(main_widget)
-        main_layout.setSpacing(60)
-        main_layout.setContentsMargins(30, 40, 30, 60)
-        main_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+        self._view = QWebEngineView()
 
-        self.build_ui()
-        self.setWidget(main_widget)
+        # Light background matching the foldout UI
+        self._view.page().setBackgroundColor(QColor("#f8fafc"))
 
-    def _apply_light_palette(self):
-        """Temporarily override module-level palette globals for light theme."""
-        global CardBg, Muted
-        CardBg = _LIGHT_CARD_BG
-        Muted  = _LIGHT_MUTED
+        # Allow local content to fetch Google Fonts (remote resources)
+        settings = self._view.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, False)
 
-    def build_ui(self):
-        _build_pipeline_ui(light=True)
+        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        QTimer.singleShot(120, self.build_arrows)
+        # Load the bundled HTML asset
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        html_path = os.path.join(base_dir, "assets", "conversion_pipeline.html")
+        self._view.load(QUrl.fromLocalFile(html_path))
 
-    def build_arrows(self):
-        _build_pipeline_arrows()
+        lay.addWidget(self._view)
+        self.setMinimumHeight(420)
+
+
 
 
 class TimelineApp(QMainWindow):
