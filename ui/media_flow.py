@@ -427,6 +427,7 @@ class MediaFlowWidget(QFrame):
         
         # PAGE 2: Conversion
         self.page_conv = QWidget()
+        self.page_conv.setStyleSheet("QWidget { background-color: #f8fafc; }")
         conv_page_layout = QVBoxLayout(self.page_conv)
         conv_page_layout.setContentsMargins(16, 16, 16, 16)
         conv_page_layout.setSpacing(10)
