@@ -230,6 +230,31 @@ class SecureServerWindow(QMainWindow):
         self.setCentralWidget(self.central_w)
         
         self.all_flows: List[MediaFlowWidget] = []
+        
+        from services.local_db import LocalDBManager
+        self.db_manager = LocalDBManager()
+        self._restore_saved_flows()
+
+    def _restore_saved_flows(self) -> None:
+        try:
+            items = self.db_manager.get_all_items()
+            for row in items:
+                index = len(self.all_flows) + 1
+                flow = MediaFlowWidget(
+                    index=index,
+                    relative_path=row["relative_path"],
+                    torrent_bytes=b"", # Don't need original bytes for restored
+                    image_url=row.get("image_url", ""),
+                    title=row["title"],
+                    season=row.get("season", ""),
+                    parent=self.scroll_content,
+                    db_id=row["id"],
+                    is_restored=True
+                )
+                self.all_flows.append(flow)
+                self.flows_layout.addWidget(flow)
+        except Exception as e:
+            print(f"Failed to restore media flows: {e}")
 
     def _spawn_browser_modal_with_blur(self) -> None:
         # Guard: only one browser modal at a time
@@ -260,8 +285,16 @@ class SecureServerWindow(QMainWindow):
                 with open(file_path, "rb") as f:
                     torrent_bytes = f.read()
 
+                # Add to local db
+                db_id = self.db_manager.add_item(
+                    relative_path=relative_path,
+                    image_url=img_url,
+                    title=title,
+                    season=season
+                )
+
                 index = len(self.all_flows) + 1
-                flow = MediaFlowWidget(index, relative_path, torrent_bytes, img_url, title, season, self.scroll_content)
+                flow = MediaFlowWidget(index, relative_path, torrent_bytes, img_url, title, season, self.scroll_content, db_id=db_id)
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
             # Cancelled: no error, nothing to do

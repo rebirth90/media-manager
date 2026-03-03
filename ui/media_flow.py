@@ -29,12 +29,14 @@ class QueueAppenderThread(QThread):
             self.error.emit(str(e))
 
 class MediaFlowWidget(QFrame):
-    def __init__(self, index: int, relative_path: str, torrent_bytes: bytes, image_url: str, title: str, season: str = "", parent=None):
+    def __init__(self, index: int, relative_path: str, torrent_bytes: bytes, image_url: str, title: str, season: str = "", parent=None, db_id: int = None, is_restored: bool = False):
         super().__init__(parent)
         self.flow_index = index
         self.relative_path = relative_path
         self.torrent_bytes = torrent_bytes
         self.image_url = image_url
+        self.db_id = db_id
+        self.is_restored = is_restored
         base_title = title if title else "Unknown Media"
         if season:
             self.title = f"{base_title} - {season}"
@@ -556,11 +558,12 @@ class MediaFlowWidget(QFrame):
         self.poll_worker.set_pre_add_state(current_hashes)
         self.poll_worker.start()
         
-        base_path = os.getenv("BASE_SCRATCH_PATH", "/data/scratch")
-        final_save_path = f"{base_path}/{self.relative_path}".replace("\\", "/")
-        
-        self.qbit_worker = QBittorrentClient(self.torrent_bytes, final_save_path, self)
-        self.qbit_worker.start()
+        if not self.is_restored and self.torrent_bytes:
+            base_path = os.getenv("BASE_SCRATCH_PATH", "/data/scratch")
+            final_save_path = f"{base_path}/{self.relative_path}".replace("\\", "/")
+            
+            self.qbit_worker = QBittorrentClient(self.torrent_bytes, final_save_path, self)
+            self.qbit_worker.start()
 
     def _on_title_resolved(self, resolved_title: str) -> None:
         self.title_lbl.setText(resolved_title)
@@ -796,5 +799,17 @@ class MediaFlowWidget(QFrame):
 
     def _on_deleted(self, success: bool) -> None:
         if success:
+            if hasattr(self, 'db_id') and self.db_id is not None:
+                try:
+                    from services.local_db import LocalDBManager
+                    db = LocalDBManager()
+                    db.delete_item(self.db_id)
+                except Exception as e:
+                    print(f"Failed to delete DB entry: {e}")
+                    
+            if hasattr(self.window(), 'all_flows'):
+                if self in self.window().all_flows:
+                    self.window().all_flows.remove(self)
+                    
             self.close_flow()
             self.setParent(None)
