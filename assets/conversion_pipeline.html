@@ -300,6 +300,44 @@
     .branch-row .sc {
       flex: 1;
     }
+
+    /* ── STAGE SUCCESS STATE ── */
+    .sc.stage-success {
+      border-left-color: #16a34a !important;
+      background: rgba(22, 163, 74, 0.07) !important;
+      box-shadow: inset 3px 0 0 0 #16a34a, 0 0 0 1.5px rgba(22, 163, 74, 0.35);
+      transition: all 0.4s ease;
+    }
+
+    .sc.stage-success .sc-title {
+      color: #15803d !important;
+    }
+
+    .sc.stage-success .sc-dot {
+      background: #16a34a !important;
+    }
+
+    /* ── STAGE FAIL STATE ── */
+    .sc.stage-fail {
+      border-left-color: #dc2626 !important;
+      background: rgba(220, 38, 38, 0.07) !important;
+      box-shadow: inset 3px 0 0 0 #dc2626, 0 0 0 1.5px rgba(220, 38, 38, 0.35);
+      transition: all 0.4s ease;
+    }
+
+    .sc.stage-fail .sc-title {
+      color: #b91c1c !important;
+    }
+
+    .sc.stage-fail .sc-dot {
+      background: #dc2626 !important;
+    }
+
+    /* ── STAGE SKIP STATE (branch not taken) ── */
+    .sc.stage-skip {
+      opacity: 0.45;
+      transition: opacity 0.4s ease;
+    }
   </style>
 </head>
 
@@ -549,6 +587,91 @@
     const SVG = document.getElementById('arrows-svg');
     const PAGE = document.getElementById('page');
 
+    // ─── PIPELINE STATE ──────────────────────────────────────────────────────────
+    // Maps stage card IDs to completion state. Populated by Python via runJavaScript.
+    let _pipelineState = {};
+
+    // Arrow definitions: each entry = [fromId, toId, arrowKey]
+    // arrowKey is true if BOTH endpoints are completed.
+    const ARROW_PAIRS = [
+      ['p1-input', 'p1-queue', 'a-p1-inq'],
+      ['p1-queue', 'p2-dequeue', 'a-p1-p2'],
+      ['p2-dequeue', 'p2-fail', 'a-p2-fail'],
+      ['p2-dequeue', 'p2-pass', 'a-p2-pass'],
+      ['p2-fail', 'p2-dequeue', 'a-p2-loop'],
+      ['p2-pass', 'p3-router', 'a-p2-p3'],
+      ['p3-router', 'p3-movie', 'a-p3-mov'],
+      ['p3-router', 'p3-tv', 'a-p3-tv'],
+      ['p3-movie', 'p4-movie', 'a-p3-p4m'],
+      ['p3-tv', 'p4-tv', 'a-p3-p4t'],
+      ['p4-movie', 'p5-check', 'a-p4-p5m'],
+      ['p4-tv', 'p5-check', 'a-p4-p5t'],
+      ['p5-check', 'p5-fail', 'a-p5-fail'],
+      ['p5-check', 'p5-pass', 'a-p5-pass'],
+      ['p5-fail', 'p2-dequeue', 'a-p5-loop'],
+      ['p5-pass', 'p6-discovery', 'a-p5-p6'],
+      ['p6-discovery', 'p6-vobsub', 'a-p6-vob'],
+      ['p6-discovery', 'p6-text', 'a-p6-txt'],
+      ['p6-vobsub', 'p7-heuristics', 'a-p6-p7v'],
+      ['p6-text', 'p7-heuristics', 'a-p6-p7t'],
+      ['p7-heuristics', 'p7-audio', 'a-p7-ha'],
+      ['p7-audio', 'p7-tiers', 'a-p7-at'],
+      ['p7-tiers', 'p7-outcome', 'a-p7-to'],
+      ['p7-outcome', 'p8-relocate', 'a-p7-p8'],
+      ['p8-relocate', 'p8-movie', 'a-p8-rm'],
+      ['p8-relocate', 'p8-tv', 'a-p8-rt'],
+      ['p8-movie', 'p8-cleanup', 'a-p8-mc'],
+      ['p8-tv', 'p8-cleanup', 'a-p8-tc'],
+      ['p8-cleanup', 'p8-complete', 'a-p8-cc'],
+    ];
+
+    // Track which arrow keys are "active" (both endpoints complete) or "failed"
+    let _activeArrows = new Set();
+    let _failedArrows = new Set();
+
+    /**
+     * Called by Python: stages = { "p1-input": "pass", "p6-vobsub": "fail", "p6-text": "skip", ... }
+     * pass  → green border     (stage completed successfully)
+     * fail  → red border       (stage encountered an error)
+     * skip  → dimmed           (branch was not taken for this job)
+     */
+    window.setPipelineState = function (stages) {
+      _pipelineState = stages || {};
+
+      // Apply correct class on each card, clearing others first
+      Object.entries(_pipelineState).forEach(([id, state]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('stage-success', 'stage-fail', 'stage-skip');
+        if (state === 'pass') el.classList.add('stage-success');
+        else if (state === 'fail') el.classList.add('stage-fail');
+        else if (state === 'skip') el.classList.add('stage-skip');
+      });
+
+      // Recompute active arrows
+      // Active (green) if both endpoints are 'pass'
+      // Failed (red)   if either endpoint is 'fail'
+      _activeArrows.clear();
+      _failedArrows.clear();
+      ARROW_PAIRS.forEach(([from, to, key]) => {
+        const fs = _pipelineState[from], ts = _pipelineState[to];
+
+        // Treat both 'pass' and 'skip' as active progression states
+        const fsActive = (fs === 'pass' || fs === 'skip');
+        const tsActive = (ts === 'pass' || ts === 'skip');
+
+        if (fsActive && tsActive) _activeArrows.add(key);
+        else if (fs === 'fail' || ts === 'fail') _failedArrows.add(key);
+      });
+
+      // Rebuild arrows to reflect current state
+      safeDraw();
+    };
+
+    window.resetPipelineState = function () {
+      window.setPipelineState({});
+    };
+
     let _zoom = 1, _naturalW = 0, _naturalH = 0;
 
     // ─── Auto-fit: zoom so all 8 columns fill the viewport width ────────────────
@@ -577,17 +700,20 @@
       return { top, bottom, left, right, cx: left + w / 2, cy: top + h / 2, w, h };
     }
 
-    function mp(d, stroke, dashed, marker) {
+    function mp(d, stroke, dashed, marker, arrowKey) {
       const ns = 'http://www.w3.org/2000/svg';
       const p = document.createElementNS(ns, 'path');
+      const active = arrowKey && _activeArrows.has(arrowKey);
+      const failed = arrowKey && _failedArrows.has(arrowKey);
       p.setAttribute('d', d);
-      p.setAttribute('stroke', stroke);
-      p.setAttribute('stroke-width', '1.6px');
+      p.setAttribute('stroke', active ? '#16a34a' : (failed ? '#dc2626' : stroke));
+      p.setAttribute('stroke-width', (active || failed) ? '3px' : '1.6px');
       p.setAttribute('fill', 'none');
       p.setAttribute('stroke-linecap', 'square');
       p.setAttribute('stroke-linejoin', 'miter');
+      p.setAttribute('opacity', (active || failed) ? '1' : '0.75');
       if (dashed) p.setAttribute('stroke-dasharray', '5 4');
-      if (marker) p.setAttribute('marker-end', `url(#${marker})`);
+      if (marker) p.setAttribute('marker-end', active ? `url(#m-green)` : (failed ? `url(#m-red)` : `url(#${marker})`));
       SVG.appendChild(p);
     }
 
@@ -611,15 +737,15 @@
     }
 
     // ── V: straight vertical between adjacent cards (x = supplied or f.cx) ──────
-    function V(fromId, toId, c, m, x) {
+    function V(fromId, toId, c, m, x, arrowKey) {
       const f = G(fromId), t = G(toId);
       if (!f || !t) return;
       const px = (x !== undefined) ? x : f.cx;
-      mp(`M ${px} ${f.bottom + 4} L ${px} ${t.top - 7}`, c, false, m);
+      mp(`M ${px} ${f.bottom + 4} L ${px} ${t.top - 7}`, c, false, m, arrowKey);
     }
 
     // ── FWD: inter-column forward arrow ──────────────────────────────────────────
-    function FWD(fromId, toId, c, m, gapOff, yFromFrac, yToFrac, exitSide) {
+    function FWD(fromId, toId, c, m, gapOff, yFromFrac, yToFrac, exitSide, arrowKey) {
       const f = G(fromId), t = G(toId);
       if (!f || !t) return;
       const gx = gapCX(fromId) + (gapOff || 0);
@@ -627,33 +753,33 @@
 
       if (exitSide === 'bottom') {
         const yS = f.bottom + 10;
-        mp(`M ${f.cx} ${f.bottom + 2} L ${f.cx} ${yS} L ${gx} ${yS} L ${gx} ${yE} L ${t.left - 2} ${yE}`, c, false, m);
+        mp(`M ${f.cx} ${f.bottom + 2} L ${f.cx} ${yS} L ${gx} ${yS} L ${gx} ${yE} L ${t.left - 2} ${yE}`, c, false, m, arrowKey);
       } else {
         const yS = f.top + f.h * (yFromFrac !== undefined ? yFromFrac : 0.5);
-        mp(`M ${f.right + 2} ${yS} L ${gx} ${yS} L ${gx} ${yE} L ${t.left - 2} ${yE}`, c, false, m);
+        mp(`M ${f.right + 2} ${yS} L ${gx} ${yS} L ${gx} ${yE} L ${t.left - 2} ${yE}`, c, false, m, arrowKey);
       }
     }
 
     // ── SKIP: same-col non-adjacent, routes via right gutter ─────────────────────
-    function SKIP(fromId, toId, c, m, gOff) {
+    function SKIP(fromId, toId, c, m, gOff, arrowKey) {
       const f = G(fromId), t = G(toId);
       if (!f || !t) return;
       const gx = colRX(fromId) + 10 + (gOff || 0);
-      mp(`M ${f.right + 2} ${f.cy} L ${gx} ${f.cy} L ${gx} ${t.top - 14} L ${t.cx} ${t.top - 14} L ${t.cx} ${t.top - 2}`, c, false, m);
+      mp(`M ${f.right + 2} ${f.cy} L ${gx} ${f.cy} L ${gx} ${t.top - 14} L ${t.cx} ${t.top - 14} L ${t.cx} ${t.top - 2}`, c, false, m, arrowKey);
     }
 
     // ── LOOP_UP: same-col loop back (target ABOVE source), dashed ────────────────
     // Height fixed to t.top - 22 to match the LOOP_BACK height
-    function LOOP_UP(fromId, toId, c, m, xOff) {
+    function LOOP_UP(fromId, toId, c, m, xOff, arrowKey) {
       const f = G(fromId), t = G(toId);
       if (!f || !t) return;
       const gx = colRX(fromId) + 26;
       const tx = t.cx + (xOff || 0); // Apply custom target X offset
-      mp(`M ${f.right + 2} ${f.cy} L ${gx} ${f.cy} L ${gx} ${t.top - 22} L ${tx} ${t.top - 22} L ${tx} ${t.top - 2}`, c, true, m);
+      mp(`M ${f.right + 2} ${f.cy} L ${gx} ${f.cy} L ${gx} ${t.top - 22} L ${tx} ${t.top - 22} L ${tx} ${t.top - 2}`, c, true, m, arrowKey);
     }
 
     // ── LOOP_BACK: cross-col backward, dashed ────────────────────────────────────
-    function LOOP_BACK(fromId, toId, c, m, laneOff, xOff) {
+    function LOOP_BACK(fromId, toId, c, m, laneOff, xOff, arrowKey) {
       const f = G(fromId), t = G(toId);
       if (!f || !t) return;
 
@@ -675,7 +801,7 @@
       const lx = colLX(toId) - 18;
       const tx = t.cx + (xOff || 0); // Apply custom target X offset
 
-      mp(`M ${f.right + 2} ${f.cy} L ${rx} ${f.cy} L ${rx} ${laneY} L ${lx} ${laneY} L ${lx} ${t.top - 22} L ${tx} ${t.top - 22} L ${tx} ${t.top - 2}`, c, true, m);
+      mp(`M ${f.right + 2} ${f.cy} L ${rx} ${f.cy} L ${rx} ${laneY} L ${lx} ${laneY} L ${lx} ${t.top - 22} L ${tx} ${t.top - 22} L ${tx} ${t.top - 2}`, c, true, m, arrowKey);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -693,65 +819,63 @@
       const Pu = 'rgba(147,51,234,.85)';
 
       // ── Phase 1 ────────────────────────────────────────────────────────────────
-      V('p1-input', 'p1-queue', T, 'm-teal');
+      V('p1-input', 'p1-queue', T, 'm-teal', undefined, 'a-p1-inq');
 
       // ── Phase 1 → 2 ────────────────────────────────────────────────────────────
-      FWD('p1-queue', 'p2-dequeue', T, 'm-teal');
+      FWD('p1-queue', 'p2-dequeue', T, 'm-teal', undefined, undefined, undefined, undefined, 'a-p1-p2');
 
       // ── Phase 2 ────────────────────────────────────────────────────────────────
-      V('p2-dequeue', 'p2-fail', Re, 'm-red');
-      SKIP('p2-dequeue', 'p2-pass', T, 'm-teal');
-      // Loop up enters 15px to the RIGHT of the center vertical line
-      LOOP_UP('p2-fail', 'p2-dequeue', Re, 'm-red', 15);
+      V('p2-dequeue', 'p2-fail', Re, 'm-red', undefined, 'a-p2-fail');
+      SKIP('p2-dequeue', 'p2-pass', T, 'm-teal', undefined, 'a-p2-pass');
+      LOOP_UP('p2-fail', 'p2-dequeue', Re, 'm-red', 15, 'a-p2-loop');
 
       // ── Phase 2 → 3 ────────────────────────────────────────────────────────────
-      FWD('p2-pass', 'p3-router', T, 'm-teal');
+      FWD('p2-pass', 'p3-router', T, 'm-teal', undefined, undefined, undefined, undefined, 'a-p2-p3');
 
       // ── Phase 3 ────────────────────────────────────────────────────────────────
       const m3 = G('p3-movie'), tv3 = G('p3-tv');
-      V('p3-router', 'p3-movie', Gr, 'm-green', m3.cx);
-      V('p3-router', 'p3-tv', Y, 'm-yellow', tv3.cx);
+      V('p3-router', 'p3-movie', Gr, 'm-green', m3.cx, 'a-p3-mov');
+      V('p3-router', 'p3-tv', Y, 'm-yellow', tv3.cx, 'a-p3-tv');
 
       // ── Phase 3 → 4 ────────────────────────────────────────────────────────────
-      FWD('p3-movie', 'p4-movie', Gr, 'm-green', -8, 0.5, 0.35, 'bottom');
-      FWD('p3-tv', 'p4-tv', Y, 'm-yellow', 8, 0.5, 0.65);
+      FWD('p3-movie', 'p4-movie', Gr, 'm-green', -8, 0.5, 0.35, 'bottom', 'a-p3-p4m');
+      FWD('p3-tv', 'p4-tv', Y, 'm-yellow', 8, 0.5, 0.65, undefined, 'a-p3-p4t');
 
       // ── Phase 4 → 5 ────────────────────────────────────────────────────────────
-      FWD('p4-movie', 'p5-check', Gr, 'm-green', -8, 0.5, 0.32);
-      FWD('p4-tv', 'p5-check', Y, 'm-yellow', 8, 0.5, 0.68);
+      FWD('p4-movie', 'p5-check', Gr, 'm-green', -8, 0.5, 0.32, undefined, 'a-p4-p5m');
+      FWD('p4-tv', 'p5-check', Y, 'm-yellow', 8, 0.5, 0.68, undefined, 'a-p4-p5t');
 
       // ── Phase 5 ────────────────────────────────────────────────────────────────
-      V('p5-check', 'p5-fail', Re, 'm-red');
-      SKIP('p5-check', 'p5-pass', T, 'm-teal');
-      // Loop back enters 15px to the LEFT of the center vertical line
-      LOOP_BACK('p5-fail', 'p2-dequeue', Re, 'm-red', 0, -15);
+      V('p5-check', 'p5-fail', Re, 'm-red', undefined, 'a-p5-fail');
+      SKIP('p5-check', 'p5-pass', T, 'm-teal', undefined, 'a-p5-pass');
+      LOOP_BACK('p5-fail', 'p2-dequeue', Re, 'm-red', 0, -15, 'a-p5-loop');
 
       // ── Phase 5 → 6 ────────────────────────────────────────────────────────────
-      FWD('p5-pass', 'p6-discovery', T, 'm-teal');
+      FWD('p5-pass', 'p6-discovery', T, 'm-teal', undefined, undefined, undefined, undefined, 'a-p5-p6');
 
       // ── Phase 6 ────────────────────────────────────────────────────────────────
-      V('p6-discovery', 'p6-vobsub', Pu, 'm-purple');
-      SKIP('p6-discovery', 'p6-text', Pu, 'm-purple');
+      V('p6-discovery', 'p6-vobsub', Pu, 'm-purple', undefined, 'a-p6-vob');
+      SKIP('p6-discovery', 'p6-text', Pu, 'm-purple', undefined, 'a-p6-txt');
 
       // ── Phase 6 → 7 ────────────────────────────────────────────────────────────
-      FWD('p6-vobsub', 'p7-heuristics', Pu, 'm-purple', -8, 0.5, 0.32);
-      FWD('p6-text', 'p7-heuristics', Pu, 'm-purple', 8, 0.5, 0.68);
+      FWD('p6-vobsub', 'p7-heuristics', Pu, 'm-purple', -8, 0.5, 0.32, undefined, 'a-p6-p7v');
+      FWD('p6-text', 'p7-heuristics', Pu, 'm-purple', 8, 0.5, 0.68, undefined, 'a-p6-p7t');
 
       // ── Phase 7 ────────────────────────────────────────────────────────────────
-      V('p7-heuristics', 'p7-audio', T, 'm-teal');
-      V('p7-audio', 'p7-tiers', Pu, 'm-purple');
-      V('p7-tiers', 'p7-outcome', Y, 'm-yellow');
+      V('p7-heuristics', 'p7-audio', T, 'm-teal', undefined, 'a-p7-ha');
+      V('p7-audio', 'p7-tiers', Pu, 'm-purple', undefined, 'a-p7-at');
+      V('p7-tiers', 'p7-outcome', Y, 'm-yellow', undefined, 'a-p7-to');
 
       // ── Phase 7 → 8 ────────────────────────────────────────────────────────────
-      FWD('p7-outcome', 'p8-relocate', T, 'm-teal');
+      FWD('p7-outcome', 'p8-relocate', T, 'm-teal', undefined, undefined, undefined, undefined, 'a-p7-p8');
 
       // ── Phase 8 ────────────────────────────────────────────────────────────────
       const m8 = G('p8-movie'), tv8 = G('p8-tv');
-      V('p8-relocate', 'p8-movie', Gr, 'm-green', m8.cx);
-      V('p8-relocate', 'p8-tv', Y, 'm-yellow', tv8.cx);
-      V('p8-movie', 'p8-cleanup', Gr, 'm-green', m8.cx);
-      V('p8-tv', 'p8-cleanup', Y, 'm-yellow', tv8.cx);
-      V('p8-cleanup', 'p8-complete', Gr, 'm-green');
+      V('p8-relocate', 'p8-movie', Gr, 'm-green', m8.cx, 'a-p8-rm');
+      V('p8-relocate', 'p8-tv', Y, 'm-yellow', tv8.cx, 'a-p8-rt');
+      V('p8-movie', 'p8-cleanup', Gr, 'm-green', m8.cx, 'a-p8-mc');
+      V('p8-tv', 'p8-cleanup', Y, 'm-yellow', tv8.cx, 'a-p8-tc');
+      V('p8-cleanup', 'p8-complete', Gr, 'm-green', undefined, 'a-p8-cc');
     }
 
     // ─── Qt WebEngine / ResizeObserver Integration ───────────────────────────────

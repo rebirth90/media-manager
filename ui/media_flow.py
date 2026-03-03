@@ -166,8 +166,8 @@ class MediaFlowWidget(QFrame):
         self.prog_bar_dl.setFixedWidth(70)
         self.prog_bar_dl.setStyleSheet("""
             QProgressBar {
-                background-color: #1e293b;
-                border: 1px solid #0f172a;
+                background-color: #4ade80;
+                border: 1px solid #16a34a;
                 border-radius: 4px;
                 text-align: center;
                 color: #ffffff;
@@ -175,11 +175,10 @@ class MediaFlowWidget(QFrame):
                 font-size: 7pt;
             }
             QProgressBar::chunk {
-                background-color: #4ade80;
-                border-radius: 3px;
+                background-color: transparent;
             }
         """)
-        self.prog_bar_dl.setFixedHeight(15)
+        self.prog_bar_dl.setFixedHeight(18)
 
         self.lbl_speed_cap = QLabel("Speed:")
         self.lbl_speed_cap.setStyleSheet(lbl_style_cap)
@@ -493,11 +492,15 @@ class MediaFlowWidget(QFrame):
             active_widget.setStyleSheet("QWidget#ClickableSection { background-color: #f0f8ff; border-radius: 10px; }")
             active_chev.setPixmap(self.chev_up)
             
-            # Animate open if it was closed
-            if self.details_foldout_container.height() == 0:
-                self.foldout_anim.setStartValue(0)
-                self.foldout_anim.setEndValue(600)  # Tall enough for WebEngine pipeline view
-                self.foldout_anim.start()
+            # Animate open if it was closed or switching tabs
+            target_h = self.foldout_stack.widget(index).sizeHint().height()
+            if index == 2:
+                target_h = 500  # Generous height for WebEngine / flowchart view
+
+            self.foldout_anim.stop()
+            self.foldout_anim.setStartValue(self.details_foldout_container.height() if self.details_foldout_container.height() > 0 else 0)
+            self.foldout_anim.setEndValue(target_h)
+            self.foldout_anim.start()
             
             self.main_card_container.setStyleSheet("""
                 #MainCard {
@@ -598,6 +601,7 @@ class MediaFlowWidget(QFrame):
         if target_torrents:
             t = target_torrents[0]
             self._current_hash = t.get('hash', "")
+            self._torrent_name = t.get('name', 'Unknown')
             prog_val = t.get('progress', 0.0)
             state = t.get('state', 'Unknown')
             dlspeed = t.get('dlspeed', 0)
@@ -620,27 +624,34 @@ class MediaFlowWidget(QFrame):
             is_done = state in ['uploading', 'stalledUP', 'pausedUP', 'completed', 'stalledDL'] and prog_val == 1.0
             
             human_state = "Unknown"
+            pb_style = ""
+            base_pb_style = "QProgressBar { background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; color: #0f172a; font-weight: bold; font-size: 7pt; }"
             if is_done or prog_val == 1.0:
-                human_state = "Done"
-                state_txt = "✅ Done"
-                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #16a34a; border-radius: 4px; padding: 2px 8px;"
+                human_state = "Completed"
+                state_txt = "Completed"
+                state_css = "font-size: 9pt; font-weight: bold; color: #0f172a;"
+                pb_style = base_pb_style + " QProgressBar::chunk { background-color: #4ade80; border-radius: 3px; }"
             elif state in ['downloading', 'stalledDL'] and prog_val < 1.0:
                 human_state = "Downloading"
-                state_txt = "📥 Downloading"
-                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #2563eb; border-radius: 4px; padding: 2px 8px;"
+                state_txt = "Downloading"
+                state_css = "font-size: 9pt; font-weight: bold; color: #0f172a;"
+                pb_style = base_pb_style + " QProgressBar::chunk { background-color: #3b82f6; border-radius: 3px; }"
             elif state in ['pausedDL', 'stopped', 'stoppedDL', 'checkingDL', 'checkingUP']:
                 human_state = "Stopped"
-                state_txt = "⏹️ Stopped"
-                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #64748b; border-radius: 4px; padding: 2px 8px;"
+                state_txt = "Stopped"
+                state_css = "font-size: 9pt; font-weight: bold; color: #0f172a;"
+                pb_style = base_pb_style + " QProgressBar::chunk { background-color: #94a3b8; border-radius: 3px; }"
             else:
                 human_state = state.capitalize()
-                state_txt = f"⏳ {human_state}"
-                state_css = "font-size: 8pt; color: white; font-weight: bold; background-color: #f59e0b; border-radius: 4px; padding: 2px 8px;"
+                state_txt = human_state
+                state_css = "font-size: 9pt; font-weight: bold; color: #0f172a;"
+                pb_style = base_pb_style + " QProgressBar::chunk { background-color: #f59e0b; border-radius: 3px; }"
 
             self._active_qbit_state = f"State: {human_state} | Progress: {int(prog_val * 100)}% | Size: {self._format_size(size)}"
 
             self.lbl_state_val.setText(state_txt)
             self.lbl_state_val.setStyleSheet(state_css)
+            self.prog_bar_dl.setStyleSheet(pb_style)
             
             self.lbl_size_val.setText(self._format_size(size))
             self.prog_bar_dl.setValue(int(prog_val * 100))
@@ -676,7 +687,9 @@ class MediaFlowWidget(QFrame):
         if hasattr(self, 'ssh_worker') and self.ssh_worker.isRunning(): 
              return
              
-        title_for_ssh = self.title_lbl.text()
+        # Use the raw torrent name (e.g. 'The.Cruel.Sea.1953') for accurate DB/log matching
+        # Fallback to title_lbl if the torrent data hasn't populated yet
+        title_for_ssh = getattr(self, '_torrent_name', self.title_lbl.text())
         if title_for_ssh.isdigit(): 
              return  # Still waiting for TMDB fetch
         
@@ -694,7 +707,7 @@ class MediaFlowWidget(QFrame):
         self.btn_send_conv.setEnabled(False)
         self.btn_send_conv.setText("Sending...")
 
-    def _update_telemetry_ui(self, db_status: str, sub_status: str, prog: int, gen_out: str, ff_out: str) -> None:
+    def _update_telemetry_ui(self, db_status: str, sub_status: str, prog: int, gen_out: str, ff_out: str, stage_flags_json: str) -> None:
         self._active_qbit_state = f"DB Status: {db_status}"
         self._active_ffmpeg_log = ff_out
         
@@ -703,7 +716,10 @@ class MediaFlowWidget(QFrame):
         self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
         self.prog_bar_conv.setValue(prog)
-        self.prog_bar_foldout_conv.setValue(prog)
+
+        # Update live pipeline flowchart view
+        if hasattr(self, 'flowchart_view') and stage_flags_json:
+            self.flowchart_view.update_pipeline_state(stage_flags_json)
 
         if hasattr(self, 'txt_gen_log'):
             self.txt_gen_log.setPlainText(gen_out)
@@ -713,20 +729,16 @@ class MediaFlowWidget(QFrame):
         base_style = "QProgressBar { background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; color: white; font-weight: bold; font-size: 8pt; }"
         if prog >= 100 or db_status.upper() == "COMPLETED":
             self.prog_bar_conv.setValue(100)
-            self.prog_bar_foldout_conv.setValue(100)
             comp_style = base_style + " QProgressBar::chunk { background-color: #10b981; border-radius: 3px; }"
             self.prog_bar_conv.setStyleSheet(comp_style)
-            self.prog_bar_foldout_conv.setStyleSheet(comp_style)
             if hasattr(self, 'ssh_timer'): 
                 self.ssh_timer.stop()
         elif db_status.upper() == "FAILED":
             fail_style = base_style + " QProgressBar::chunk { background-color: #ef4444; border-radius: 3px; }"
             self.prog_bar_conv.setStyleSheet(fail_style)
-            self.prog_bar_foldout_conv.setStyleSheet(fail_style)
         else:
             proc_style = base_style + " QProgressBar::chunk { background-color: #3b82f6; border-radius: 3px; }"
             self.prog_bar_conv.setStyleSheet(proc_style)
-            self.prog_bar_foldout_conv.setStyleSheet(proc_style)
 
         # Determine Send button visibility
         if db_status.upper() == "NOT STARTED" and hasattr(self, 'lbl_state_val') and "Done" in self.lbl_state_val.text():

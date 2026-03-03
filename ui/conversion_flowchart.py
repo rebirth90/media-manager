@@ -310,6 +310,19 @@ class ConversionFlowViewer(QWidget):
         lay.addWidget(self._view)
         self.setMinimumHeight(420)
 
+    def update_pipeline_state(self, stages_json: str) -> None:
+        """Inject stage flags into the HTML pipeline. stages_json is a JSON string like
+        '{"p1-input": true, "p2-dequeue": true, ...}'.
+        """
+        # Sanitise: ensure it's valid JSON before injecting
+        try:
+            import json
+            json.loads(stages_json)  # validate
+        except Exception:
+            return
+        js = f"if (window.setPipelineState) {{ window.setPipelineState({stages_json}); }}"
+        self._view.page().runJavaScript(js)
+
 
 
 

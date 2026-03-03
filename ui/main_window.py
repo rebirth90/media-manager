@@ -1,6 +1,6 @@
 import os
 from typing import List
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
@@ -30,6 +30,7 @@ class SecureServerWindow(QMainWindow):
         self.showMaximized()
         self._is_dragging = False
         self._drag_pos = None
+        self._modal_open = False   # Guard: prevent multiple simultaneous Add Item modals
         
         # Refined gradient background inspired by mockup - softer, more professional
         self.setStyleSheet("""
@@ -60,12 +61,8 @@ class SecureServerWindow(QMainWindow):
         nav_layout.setSpacing(18)
         
         # Add button with refined styling matching mockup
-        self.btn_add_torrent = QPushButton(" Movie / TV-Series")
-        from PyQt6.QtGui import QIcon
-        from PyQt6.QtCore import QSize
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        self.btn_add_torrent.setIcon(QIcon(os.path.join(base_dir, "assets", "add_icon.svg")))
-        self.btn_add_torrent.setIconSize(QSize(18, 18))
+        self.btn_add_torrent = QPushButton("Add item")
+
         self.btn_add_torrent.setFixedHeight(48)
         self.btn_add_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_torrent.setStyleSheet("""
@@ -92,6 +89,7 @@ class SecureServerWindow(QMainWindow):
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search")
         from PyQt6.QtGui import QAction
+        base_dir = os.path.dirname(os.path.dirname(__file__))
         search_action = QAction(QIcon(os.path.join(base_dir, "assets", "search_icon.svg")), "Search", self)
         self.search_bar.addAction(search_action, QLineEdit.ActionPosition.LeadingPosition)
         self.search_bar.setFixedHeight(48)
@@ -101,7 +99,7 @@ class SecureServerWindow(QMainWindow):
                 background-color: #ffffff;
                 border: 2px solid #c8d8e8;
                 border-radius: 24px;
-                padding-left: 24px;
+                padding-left: 40px;
                 padding-right: 24px;
                 font-size: 10.5pt;
                 color: #3d4f60;
@@ -114,6 +112,8 @@ class SecureServerWindow(QMainWindow):
                 color: #a0b0c0;
             }
         """)
+        # Make search icon bigger via style on the leading action icon
+        self.search_bar.setMinimumWidth(280)
 
         # Window control buttons
         window_controls = QHBoxLayout()
@@ -168,9 +168,10 @@ class SecureServerWindow(QMainWindow):
         window_controls.addWidget(self.btn_close)
 
         nav_layout.addWidget(self.btn_add_torrent)
-        nav_layout.addStretch()
+        nav_layout.addStretch(1)
         nav_layout.addWidget(self.search_bar)
-        nav_layout.addStretch()
+        nav_layout.addStretch(1)           # Equal stretch after search → centers the bar
+
         nav_layout.addLayout(window_controls)
 
         self.main_layout.addWidget(self.header_container)
@@ -231,17 +232,21 @@ class SecureServerWindow(QMainWindow):
         self.all_flows: List[MediaFlowWidget] = []
 
     def _spawn_browser_modal_with_blur(self) -> None:
-        # Enhanced blur effect
-        blur_effect = QGraphicsBlurEffect()
-        blur_effect.setBlurRadius(25)
-        self.canvas_container.setGraphicsEffect(blur_effect)
+        # Guard: only one browser modal at a time
+        if self._modal_open:
+            return
+        self._modal_open = True
+        try:
+            blur_effect = QGraphicsBlurEffect()
+            blur_effect.setBlurRadius(25)
+            self.canvas_container.setGraphicsEffect(blur_effect)
 
-        dialog = BrowserModalDialog(self.shared_profile, self)
-        dialog.torrent_downloaded.connect(self._process_downloaded_torrent)
-        dialog.exec()
-        
-        # Remove blur
-        self.canvas_container.setGraphicsEffect(None)
+            dialog = BrowserModalDialog(self.shared_profile, self)
+            dialog.torrent_downloaded.connect(self._process_downloaded_torrent)
+            dialog.exec()
+        finally:
+            self.canvas_container.setGraphicsEffect(None)
+            self._modal_open = False
 
     def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str, season: str = "") -> None:
         try:
@@ -259,13 +264,16 @@ class SecureServerWindow(QMainWindow):
                 flow = MediaFlowWidget(index, relative_path, torrent_bytes, img_url, title, season, self.scroll_content)
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
-                
+            # Cancelled: no error, nothing to do
         except Exception as e:
             print(f"Error instantiating pipeline: {e}")
         finally:
             self.canvas_container.setGraphicsEffect(None)
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
 
     def closeEvent(self, event) -> None:
         for flow in self.all_flows:
