@@ -291,8 +291,8 @@ class ConversionFlowViewer(QWidget):
 
         self._view = QWebEngineView()
 
-        # Light background matching the foldout UI
-        self._view.page().setBackgroundColor(QColor("#f8fafc"))
+        # Transparent background matching the dark theme foldout UI
+        self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
 
         # Allow local content to fetch Google Fonts (remote resources)
         settings = self._view.settings()
@@ -308,7 +308,19 @@ class ConversionFlowViewer(QWidget):
         self._view.load(QUrl.fromLocalFile(html_path))
 
         lay.addWidget(self._view)
-        self.setMinimumHeight(420)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = self.width()
+        natural_w = 2440.0
+        natural_h = 580.0 # Absolute natural bounds of HTML + gap
+        
+        # Since HTML uses `document.documentElement.clientWidth` for width zoom
+        zoom = w / natural_w if w < natural_w else 1.0
+        target_h = int(natural_h * zoom)
+        
+        if self.maximumHeight() != target_h:
+            self.setFixedHeight(target_h)
 
     def update_pipeline_state(self, stages_json: str) -> None:
         """Inject stage flags into the HTML pipeline. stages_json is a JSON string like

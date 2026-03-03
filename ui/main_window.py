@@ -35,7 +35,7 @@ class SecureServerWindow(QMainWindow):
         # Refined gradient background inspired by mockup - softer, more professional
         self.setStyleSheet("""
             QMainWindow { 
-                background-color: #ffffff;
+                background-color: #0A0B0E;
                 font-family: 'Segoe UI', 'San Francisco', 'Helvetica Neue', Arial, sans-serif; 
             }
         """)
@@ -49,8 +49,8 @@ class SecureServerWindow(QMainWindow):
         self.header_container = QWidget()
         self.header_container.setStyleSheet("""
             QWidget {
-                background-color: #ffffff;
-                border-bottom: 1px solid #e1e4e8;
+                background-color: #0F1115;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             }
         """)
         self.header_container.setFixedHeight(72)
@@ -67,20 +67,19 @@ class SecureServerWindow(QMainWindow):
         self.btn_add_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_torrent.setStyleSheet("""
             QPushButton { 
-                background-color: #9dc9e0; 
-                color: #0f2847; 
+                background-color: #3b82f6; 
+                color: #ffffff; 
                 border: none; 
-                border-radius: 24px; 
+                border-radius: 8px; 
                 padding: 0 28px; 
                 font-weight: 600; 
                 font-size: 11.5pt;
             }
             QPushButton:hover { 
-                background-color: #7db8d5; 
-                color: #081a2e; 
+                background-color: #2563eb; 
             }
             QPushButton:pressed {
-                background-color: #6ba8c8;
+                background-color: #1d4ed8;
             }
         """)
         self.btn_add_torrent.clicked.connect(self._spawn_browser_modal_with_blur)
@@ -96,20 +95,20 @@ class SecureServerWindow(QMainWindow):
         self.search_bar.setMaximumWidth(480)
         self.search_bar.setStyleSheet("""
             QLineEdit {
-                background-color: #ffffff;
-                border: 2px solid #c8d8e8;
-                border-radius: 24px;
+                background-color: #13151A;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
                 padding-left: 40px;
                 padding-right: 24px;
                 font-size: 10.5pt;
-                color: #3d4f60;
+                color: #f3f4f6;
             }
             QLineEdit:focus {
-                border: 2px solid #7db8d5;
-                background-color: #fcfdff;
+                border: 1px solid #3b82f6;
+                background-color: #1A1C23;
             }
             QLineEdit::placeholder {
-                color: #a0b0c0;
+                color: #6b7280;
             }
         """)
         # Make search icon bigger via style on the leading action icon
@@ -141,10 +140,10 @@ class SecureServerWindow(QMainWindow):
                 QPushButton {
                     background-color: transparent;
                     border: none;
-                    border-radius: 18px;
+                    border-radius: 8px;
                 }
                 QPushButton:hover {
-                    background-color: #f0f6fa;
+                    background-color: rgba(255, 255, 255, 0.05);
                 }
             """)
 
@@ -152,10 +151,10 @@ class SecureServerWindow(QMainWindow):
             QPushButton {
                 background-color: transparent;
                 border: none;
-                border-radius: 18px;
+                border-radius: 8px;
             }
             QPushButton:hover {
-                background-color: #ffe6e6;
+                background-color: rgba(239, 68, 68, 0.2);
             }
         """)
 
@@ -180,8 +179,7 @@ class SecureServerWindow(QMainWindow):
         self.canvas_container = QWidget()
         self.canvas_container.setStyleSheet("""
             QWidget {
-                background-color: #f8fbfe;
-                border-radius: 12px;
+                background-color: #0A0B0E;
             }
         """)
         canvas_layout = QVBoxLayout(self.canvas_container)
@@ -197,18 +195,18 @@ class SecureServerWindow(QMainWindow):
                 background-color: transparent; 
             }
             QScrollBar:vertical {
-                background: #f0f6fa;
+                background: #0F1115;
                 width: 14px;
                 border-radius: 7px;
                 margin: 2px;
             }
             QScrollBar::handle:vertical {
-                background: #b0c8d8;
+                background: #374151;
                 border-radius: 7px;
                 min-height: 40px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #90b0c8;
+                background: #4b5563;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
