@@ -270,6 +270,7 @@ class MediaCardWidget(QFrame):
         self.lbl_poster.show()
 
     def update_metadata(self, title: str, desc: str, genre: str, rating: str):
+        self.title = title
         self.title_lbl.setText(title)
         self.lbl_foldout_desc.setText(desc)
         self.lbl_foldout_genre_rating.setText(f"Genre: {genre} | Rating: ★ {rating}")
@@ -497,6 +498,7 @@ class SeriesCardWidget(QFrame):
         self.btn_collapse.setText("Expand episodes" if is_vis else "Collapse episodes")
 
     def update_metadata(self, title, desc, genre, rating):
+        self.title = title
         self.title_lbl.setText(f"{title} — {self.season}" if self.season else title)
         self.lbl_desc.setText(desc)
         self.lbl_genre.setText(f"Genre: {genre} | Rating: ★ {rating}")

@@ -326,6 +326,7 @@ class SecureServerWindow(QMainWindow):
                     
             if matched_t:
                 flow._current_hash = matched_t.get('hash', '')
+                flow._current_torrent_name = matched_t.get('name', '')
                 prog_val = matched_t.get('progress', 0.0)
                 state = matched_t.get('state', 'Unknown')
                 dlspeed = matched_t.get('dlspeed', 0)

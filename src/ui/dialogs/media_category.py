@@ -1,26 +1,28 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QComboBox, QLineEdit
+    QPushButton, QComboBox, QLineEdit, QButtonGroup
 )
+from PyQt6.QtGui import QIcon
+import os
 
 class MediaCategoryDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Construct path")
-        self.setFixedSize(500, 310)
+        self.setFixedSize(450, 300)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._is_movie = True
 
         root = QWidget(self)
-        root.setGeometry(0, 0, 500, 310)
+        root.setGeometry(0, 0, 450, 300)
         root.setObjectName("card")
         root.setStyleSheet("""
             QWidget#card {
-                background-color: #ffffff;
-                border-radius: 22px;
-                border: 1px solid #dde6ee;
+                background-color: #1A1D24;
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
             }
         """)
 
@@ -29,51 +31,65 @@ class MediaCategoryDialog(QDialog):
         outer.addWidget(root)
 
         layout = QVBoxLayout(root)
-        layout.setSpacing(20)
+        layout.setSpacing(24)
         layout.setContentsMargins(32, 28, 32, 28)
 
+        # ── Title bar with Close button ────────────────────────────
+        title_row = QHBoxLayout()
         lbl_title = QLabel("Construct path")
-        lbl_title.setStyleSheet(
-            "font-size: 16pt; font-weight: 800; color: #0d1f35; letter-spacing: -0.5px;"
-        )
-        layout.addWidget(lbl_title)
+        lbl_title.setStyleSheet("font-size: 15pt; font-weight: 700; color: #F8FAFC;")
+        title_row.addWidget(lbl_title)
+        
+        btn_close = QPushButton()
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        close_icon_path = os.path.join(base_dir, "assets", "win_close.svg").replace("\\", "/")
+        btn_close.setIcon(QIcon(close_icon_path))
+        btn_close.setIconSize(QSize(14, 14))
+        btn_close.setFixedSize(24, 24)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+            }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+        """)
+        btn_close.clicked.connect(self.reject)
+        title_row.addWidget(btn_close)
+        
+        layout.addLayout(title_row)
 
-        # Segmented pill control (grey track with blue fill for active)
-        seg_track = QWidget()
-        seg_track.setFixedHeight(52)
-        seg_track.setStyleSheet("QWidget { background-color: #ebebed; border-radius: 26px; }")
-        seg_layout = QHBoxLayout(seg_track)
-        seg_layout.setContentsMargins(5, 5, 5, 5)
-        seg_layout.setSpacing(4)
-
-        self._ss_active = (
-            "QPushButton { background-color: #2878e8; color: #ffffff; border: none;"
-            " border-radius: 21px; font-weight: 700; font-size: 11pt; padding: 0 10px; }"
-        )
-        self._ss_inactive = (
-            "QPushButton { background-color: transparent; color: #8a9aaa; border: none;"
-            " border-radius: 21px; font-weight: 600; font-size: 11pt; padding: 0 10px; }"
-        )
-
-        self.btn_movie = QPushButton("🎬  Movie")
-        self.btn_tv    = QPushButton("📺  TV-Series")
-        for _b in (self.btn_movie, self.btn_tv):
-            _b.setCursor(Qt.CursorShape.PointingHandCursor)
-            _b.setFixedHeight(42)
-
-        self.btn_movie.setStyleSheet(self._ss_active)
-        self.btn_tv.setStyleSheet(self._ss_inactive)
-        self.btn_movie.clicked.connect(lambda: self._select_type(True))
-        self.btn_tv.clicked.connect(lambda: self._select_type(False))
-
-        seg_layout.addWidget(self.btn_movie, 1)
-        seg_layout.addWidget(self.btn_tv, 1)
-        layout.addWidget(seg_track)
-
-        _div = QWidget()
-        _div.setFixedHeight(1)
-        _div.setStyleSheet("background-color: #eaeff4;")
-        layout.addWidget(_div)
+        # ── Toggle Container ───────────────────────────────────────
+        self.toggle_container = QWidget()
+        self.toggle_container.setObjectName("ToggleContainer")
+        self.toggle_container.setFixedHeight(40)
+        
+        toggle_layout = QHBoxLayout(self.toggle_container)
+        toggle_layout.setContentsMargins(4, 4, 4, 4)
+        toggle_layout.setSpacing(4)
+        
+        self.btn_movie = QPushButton("Movie")
+        self.btn_movie.setObjectName("ToggleButton")
+        self.btn_movie.setFixedHeight(32)
+        self.btn_movie.setCheckable(True)
+        self.btn_movie.setChecked(True)
+        self.btn_movie.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        self.btn_tv = QPushButton("TV-Series")
+        self.btn_tv.setObjectName("ToggleButton")
+        self.btn_tv.setFixedHeight(32)
+        self.btn_tv.setCheckable(True)
+        self.btn_tv.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        self.toggle_group = QButtonGroup(self)
+        self.toggle_group.setExclusive(True)
+        self.toggle_group.addButton(self.btn_movie, 0)
+        self.toggle_group.addButton(self.btn_tv, 1)
+        self.toggle_group.buttonClicked.connect(self._select_type)
+        
+        toggle_layout.addWidget(self.btn_movie)
+        toggle_layout.addWidget(self.btn_tv)
+        layout.addWidget(self.toggle_container)
 
         # ── Genre dropdown (movie mode) ────────────────────────────
         self.genre_container = QWidget()
@@ -82,58 +98,54 @@ class MediaCategoryDialog(QDialog):
         genre_row.setSpacing(14)
 
         lbl_genre = QLabel("Genre")
-        lbl_genre.setStyleSheet("""
-            font-size: 10pt; font-weight: 600; color: #4a6070;
-        """)
-        lbl_genre.setFixedWidth(72)
+        lbl_genre.setStyleSheet("font-size: 11pt; font-weight: 600; color: #F8FAFC;")
+        lbl_genre.setFixedWidth(64)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        chevron_down_path = os.path.join(base_dir, "assets", "chevron_down.svg").replace("\\", "/")
 
         self.genre_dropdown = QComboBox()
         self.genre_dropdown.addItems([
             "action", "adventure", "anime", "comedy",
             "crime", "drama", "horror", "sf", "thriller"
         ])
-        self.genre_dropdown.setFixedHeight(42)
-        self.genre_dropdown.setStyleSheet("""
-            QComboBox {
-                background-color: #f4f8fb;
-                border: 1.5px solid #c8d8e8;
+        self.genre_dropdown.setFixedHeight(44)
+        self.genre_dropdown.setStyleSheet(f"""
+            QComboBox {{
+                background-color: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.05);
                 border-radius: 12px;
                 padding-left: 14px;
                 padding-right: 36px;
-                font-size: 10pt;
-                color: #1e293b;
-            }
-            QComboBox:focus {
-                border-color: #7db8d5;
-                background-color: #ffffff;
-            }
-            QComboBox::drop-down {
+                font-size: 10.5pt;
+                color: #8B949E;
+            }}
+            QComboBox:focus {{
+                border-color: #3b82f6;
+            }}
+            QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: right center;
-                width: 32px;
-                border-left: 1px solid #dde8f0;
-                border-top-right-radius: 12px;
-                border-bottom-right-radius: 12px;
+                width: 38px;
+                border: none;
                 background: transparent;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                width: 0px;
-                height: 0px;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid #5a7a8a;
-                margin-top: 2px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #ffffff;
-                border: 1.5px solid #c8d8e8;
-                border-radius: 10px;
-                selection-background-color: #e8f4fb;
-                selection-color: #0f2847;
+            }}
+            QComboBox::down-arrow {{
+                image: url({chevron_down_path});
+                width: 20px;
+                height: 20px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: #1A1D24;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+                selection-background-color: #3b82f6;
+                selection-color: #ffffff;
+                color: #8B949E;
                 padding: 4px;
                 outline: 0;
-            }
+            }}
         """)
 
         genre_row.addWidget(lbl_genre)
@@ -147,26 +159,23 @@ class MediaCategoryDialog(QDialog):
         series_row.setSpacing(14)
 
         lbl_series = QLabel("Series")
-        lbl_series.setStyleSheet("""
-            font-size: 10pt; font-weight: 600; color: #4a6070;
-        """)
-        lbl_series.setFixedWidth(72)
+        lbl_series.setStyleSheet("font-size: 11pt; font-weight: 600; color: #F8FAFC;")
+        lbl_series.setFixedWidth(64)
 
         self.series_input = QLineEdit()
         self.series_input.setPlaceholderText("e.g. breaking bad")
-        self.series_input.setFixedHeight(42)
+        self.series_input.setFixedHeight(44)
         self.series_input.setStyleSheet("""
             QLineEdit {
-                background-color: #f4f8fb;
-                border: 1.5px solid #c8d8e8;
+                background-color: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.05);
                 border-radius: 12px;
                 padding-left: 14px;
-                font-size: 10pt;
-                color: #1e293b;
+                font-size: 10.5pt;
+                color: #F8FAFC;
             }
             QLineEdit:focus {
-                border-color: #7db8d5;
-                background-color: #ffffff;
+                border-color: #3b82f6;
             }
         """)
 
@@ -179,7 +188,7 @@ class MediaCategoryDialog(QDialog):
 
         # ── Action buttons ─────────────────────────────────────────
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(12)
         btn_row.addStretch()
 
         btn_cancel = QPushButton("Cancel")
@@ -187,16 +196,17 @@ class MediaCategoryDialog(QDialog):
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cancel.setStyleSheet("""
             QPushButton {
-                background-color: #f0f6fa;
-                color: #5a7a8a;
-                border: 1.5px solid #c8d8e8;
-                border-radius: 12px;
-                padding: 0 22px;
+                background-color: transparent;
+                color: #8B949E;
+                border: none;
+                border-radius: 8px;
+                padding: 0 20px;
                 font-weight: 600;
-                font-size: 10pt;
+                font-size: 10.5pt;
             }
             QPushButton:hover {
-                background-color: #e0edf5;
+                background-color: rgba(255, 255, 255, 0.05);
+                color: #F8FAFC;
             }
         """)
         btn_cancel.clicked.connect(self.reject)
@@ -206,20 +216,15 @@ class MediaCategoryDialog(QDialog):
         btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_ok.setStyleSheet("""
             QPushButton {
-                background-color: #9dc9e0;
-                color: #0f2847;
+                background-color: #3b82f6;
+                color: #ffffff;
                 border: none;
-                border-radius: 12px;
-                padding: 0 26px;
-                font-weight: 700;
-                font-size: 10pt;
+                border-radius: 8px;
+                padding: 0 24px;
+                font-weight: 600;
+                font-size: 10.5pt;
             }
-            QPushButton:hover {
-                background-color: #7db8d5;
-            }
-            QPushButton:pressed {
-                background-color: #6ba8c8;
-            }
+            QPushButton:hover { background-color: #2563eb; }
         """)
         btn_ok.clicked.connect(self.accept)
 
@@ -227,10 +232,9 @@ class MediaCategoryDialog(QDialog):
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
 
-    def _select_type(self, is_movie: bool) -> None:
+    def _select_type(self, button) -> None:
+        is_movie = (button == self.btn_movie)
         self._is_movie = is_movie
-        self.btn_movie.setStyleSheet(self._ss_active   if is_movie else self._ss_inactive)
-        self.btn_tv.setStyleSheet(   self._ss_inactive if is_movie else self._ss_active)
         self.genre_container.setVisible(is_movie)
         self.series_container.setVisible(not is_movie)
 
