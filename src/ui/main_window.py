@@ -1,29 +1,28 @@
 import os
 from typing import List
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QScrollArea, QLabel, QLineEdit, QGraphicsBlurEffect, QDialog, QApplication
+    QScrollArea, QLabel, QLineEdit, QGraphicsBlurEffect, QDialog, QApplication, QFrame
 )
 
-from ui.dialogs import BrowserModalDialog, MediaCategoryDialog
-from ui.media_flow import MediaFlowWidget
-from services.filelist_auth import FilelistAuthenticator
+from src.ui.dialogs.browser_modal import BrowserModalDialog
+from src.ui.dialogs.media_category import MediaCategoryDialog
+from src.ui.components.media_card import MediaCardWidget
+from src.utils.formatting import format_size, format_speed
 from PyQt6.QtWebEngineCore import QWebEngineProfile
 
+
 class SecureServerWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, shared_profile, media_controller) -> None:
         super().__init__()
         
-        cache_dir = os.path.join(os.getcwd(), ".qt_cache")
-        os.makedirs(cache_dir, exist_ok=True)
+        self.shared_profile = shared_profile
+        self.media_controller = media_controller
         
-        self.shared_profile = QWebEngineProfile("filelist_auth", self)
-        self.shared_profile.setPersistentStoragePath(cache_dir)
-        self.shared_profile.setCachePath(cache_dir)
-        self.auth_manager = FilelistAuthenticator(self.shared_profile, self)
-        self.auth_manager.login()
+        # Wire global controller signals back to UI
+        self.media_controller.torrents_updated.connect(self._update_qbit_ui_globally)
         
         self.setWindowTitle("Media Manager - Enterprise Dashboard")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -33,12 +32,7 @@ class SecureServerWindow(QMainWindow):
         self._modal_open = False   # Guard: prevent multiple simultaneous Add Item modals
         
         # Refined gradient background inspired by mockup - softer, more professional
-        self.setStyleSheet("""
-            QMainWindow { 
-                background-color: #0A0B0E;
-                font-family: 'Segoe UI', 'San Francisco', 'Helvetica Neue', Arial, sans-serif; 
-            }
-        """)
+        pass
 
         self.central_w = QWidget()
         self.main_layout = QVBoxLayout(self.central_w)
@@ -47,12 +41,7 @@ class SecureServerWindow(QMainWindow):
 
         # White Header Container
         self.header_container = QWidget()
-        self.header_container.setStyleSheet("""
-            QWidget {
-                background-color: #0F1115;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            }
-        """)
+        self.header_container.setObjectName("HeaderContainer")
         self.header_container.setFixedHeight(72)
         
         # Navigation inside the header
@@ -65,54 +54,12 @@ class SecureServerWindow(QMainWindow):
 
         self.btn_add_torrent.setFixedHeight(48)
         self.btn_add_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_add_torrent.setStyleSheet("""
-            QPushButton { 
-                background-color: #3b82f6; 
-                color: #ffffff; 
-                border: none; 
-                border-radius: 8px; 
-                padding: 0 28px; 
-                font-weight: 600; 
-                font-size: 11.5pt;
-            }
-            QPushButton:hover { 
-                background-color: #2563eb; 
-            }
-            QPushButton:pressed {
-                background-color: #1d4ed8;
-            }
-        """)
+        self.btn_add_torrent.setObjectName("PrimaryButton")
         self.btn_add_torrent.clicked.connect(self._spawn_browser_modal_with_blur)
         
-        # Refined search bar matching mockup design
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search")
-        from PyQt6.QtGui import QAction
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        search_action = QAction(QIcon(os.path.join(base_dir, "assets", "search_icon.svg")), "Search", self)
-        self.search_bar.addAction(search_action, QLineEdit.ActionPosition.LeadingPosition)
-        self.search_bar.setFixedHeight(48)
-        self.search_bar.setMaximumWidth(480)
-        self.search_bar.setStyleSheet("""
-            QLineEdit {
-                background-color: #13151A;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
-                padding-left: 40px;
-                padding-right: 24px;
-                font-size: 10.5pt;
-                color: #f3f4f6;
-            }
-            QLineEdit:focus {
-                border: 1px solid #3b82f6;
-                background-color: #1A1C23;
-            }
-            QLineEdit::placeholder {
-                color: #6b7280;
-            }
-        """)
-        # Make search icon bigger via style on the leading action icon
-        self.search_bar.setMinimumWidth(280)
+        # Refined functional search bar matching mockup design
+        self.search_bar = SearchBarWidget(self)
+        self.search_bar.search_query_changed.connect(self._filter_media_list)
 
         # Window control buttons
         window_controls = QHBoxLayout()
@@ -122,6 +69,7 @@ class SecureServerWindow(QMainWindow):
         self.btn_maximize = QPushButton() # Initially maximized state implies restoring next, but we start max
         self.btn_close = QPushButton()
 
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.icon_min = QIcon(os.path.join(base_dir, "assets", "win_min.svg"))
         self.icon_max = QIcon(os.path.join(base_dir, "assets", "win_max.svg"))
         self.icon_restore = QIcon(os.path.join(base_dir, "assets", "win_restore.svg"))
@@ -136,27 +84,9 @@ class SecureServerWindow(QMainWindow):
             btn.setIconSize(QSize(20, 20))
             btn.setFixedSize(36, 36)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    border: none;
-                    border-radius: 8px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 255, 255, 0.05);
-                }
-            """)
+            btn.setObjectName("WindowControlButton")
 
-        self.btn_close.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: rgba(239, 68, 68, 0.2);
-            }
-        """)
+        self.btn_close.setObjectName("WindowCloseButton")
 
         self.btn_minimize.clicked.connect(self.showMinimized)
         self.btn_maximize.clicked.connect(self._toggle_maximize)
@@ -177,11 +107,7 @@ class SecureServerWindow(QMainWindow):
 
         # Main content container with enhanced card styling
         self.canvas_container = QWidget()
-        self.canvas_container.setStyleSheet("""
-            QWidget {
-                background-color: #0A0B0E;
-            }
-        """)
+        self.canvas_container.setObjectName("CanvasContainer")
         canvas_layout = QVBoxLayout(self.canvas_container)
         canvas_layout.setContentsMargins(50, 35, 50, 28)
         canvas_layout.setSpacing(18)
@@ -189,29 +115,7 @@ class SecureServerWindow(QMainWindow):
         # Scrollable content area with custom scrollbar
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea { 
-                border: none; 
-                background-color: transparent; 
-            }
-            QScrollBar:vertical {
-                background: #0F1115;
-                width: 14px;
-                border-radius: 7px;
-                margin: 2px;
-            }
-            QScrollBar::handle:vertical {
-                background: #374151;
-                border-radius: 7px;
-                min-height: 40px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #4b5563;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
+        pass
         
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background-color: transparent;")
@@ -227,9 +131,9 @@ class SecureServerWindow(QMainWindow):
         
         self.setCentralWidget(self.central_w)
         
-        self.all_flows: List[MediaFlowWidget] = []
+        self.all_flows: List[MediaCardWidget] = []
         
-        from services.local_db import LocalDBManager
+        from src.models.local_db import LocalDBManager
         self.db_manager = LocalDBManager()
         self._restore_saved_flows()
 
@@ -238,19 +142,28 @@ class SecureServerWindow(QMainWindow):
             items = self.db_manager.get_all_items()
             for row in items:
                 index = len(self.all_flows) + 1
-                flow = MediaFlowWidget(
+                flow = MediaCardWidget(
                     index=index,
                     relative_path=row["relative_path"],
-                    torrent_bytes=b"", # Don't need original bytes for restored
-                    image_url=row.get("image_url", ""),
                     title=row["title"],
                     season=row.get("season", ""),
-                    parent=self.scroll_content,
-                    db_id=row["id"],
-                    is_restored=True
+                    parent=self.scroll_content
                 )
+                
+                # Wire signals
+                flow.delete_confirmed.connect(self._on_flow_delete)
+                
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
+                
+                self.media_controller.add_media_flow(
+                    flow_index=index,
+                    title=row["title"],
+                    relative_path=row["relative_path"],
+                    torrent_bytes=b"",
+                    image_url=row.get("image_url", ""),
+                    is_restored=True
+                )
         except Exception as e:
             print(f"Failed to restore media flows: {e}")
 
@@ -292,9 +205,28 @@ class SecureServerWindow(QMainWindow):
                 )
 
                 index = len(self.all_flows) + 1
-                flow = MediaFlowWidget(index, relative_path, torrent_bytes, img_url, title, season, self.scroll_content, db_id=db_id)
+                flow = MediaCardWidget(
+                    index=index,
+                    relative_path=relative_path,
+                    title=title,
+                    season=season,
+                    parent=self.scroll_content
+                )
+                
+                # Wire signals
+                flow.delete_confirmed.connect(self._on_flow_delete)
+
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
+                
+                self.media_controller.add_media_flow(
+                    flow_index=index,
+                    title=title,
+                    relative_path=relative_path,
+                    torrent_bytes=torrent_bytes,
+                    image_url=img_url,
+                    is_restored=False
+                )
             # Cancelled: no error, nothing to do
         except Exception as e:
             print(f"Error instantiating pipeline: {e}")
@@ -305,6 +237,77 @@ class SecureServerWindow(QMainWindow):
                     os.remove(file_path)
             except Exception:
                 pass
+
+    def _on_flow_delete(self, hashes: List[str], delete_files: bool, flow_widget: object) -> None:
+        self.media_controller.request_deletion(hashes, delete_files)
+        # remove flow from ui
+        if hasattr(flow_widget, 'close_flow'):
+            flow_widget.close_flow()
+        flow_widget.close()
+        if flow_widget in self.all_flows:
+            self.all_flows.remove(flow_widget)
+        self.flows_layout.removeWidget(flow_widget)
+
+    def _update_qbit_ui_globally(self, torrents_list: list) -> None:
+        for flow in self.all_flows:
+            matched_t = None
+            target_suffix = flow.relative_path.replace("\\", "/")
+            
+            for t in torrents_list:
+                sp = t.get('save_path', '').replace("\\", "/")
+                # Ensure the folder structure matches our target
+                if sp.endswith(target_suffix) or target_suffix in sp:
+                    matched_t = t
+                    break
+                    
+            if matched_t:
+                flow._current_hash = matched_t.get('hash', '')
+                prog_val = matched_t.get('progress', 0.0)
+                state = matched_t.get('state', 'Unknown')
+                dlspeed = matched_t.get('dlspeed', 0)
+                size = matched_t.get('size', 0)
+                
+                is_done = state in ['uploading', 'stalledUP', 'pausedUP', 'completed', 'stalledDL'] and prog_val == 1.0
+                human_state = "Unknown"
+                
+                if is_done or prog_val == 1.0:
+                    human_state = "Completed"
+                    state_css = "PillSuccess"
+                    pb_style = "PbSuccess"
+                elif state in ['downloading', 'stalledDL'] and prog_val < 1.0:
+                    human_state = "Downloading"
+                    state_css = "PillActive"
+                    pb_style = "PbActive"
+                elif state in ['pausedDL', 'stopped', 'stoppedDL', 'checkingDL', 'checkingUP']:
+                    human_state = "Stopped"
+                    state_css = "PillUnknown"
+                    pb_style = "PbUnknown"
+                else:
+                    human_state = state.capitalize()
+                    state_css = "PillWarning"
+                    pb_style = "PbWarning"
+
+                active_state_str = f"State: {human_state} | Progress: {int(prog_val * 100)}% | Size: {format_size(size)}"
+                
+                flow.update_torrent_ui(
+                    human_state=human_state,
+                    state_css=state_css,
+                    pb_style=pb_style,
+                    prog_val=prog_val,
+                    size_str=format_size(size),
+                    speed_str=format_speed(dlspeed),
+                    active_state_str=active_state_str
+                )
+
+    def _filter_media_list(self, query: str) -> None:
+        """Filter the displayed list of media cards based on the search query."""
+        query = query.lower().strip()
+        for flow in self.all_flows:
+            title = flow.title_lbl.text().lower()
+            if not query or query in title:
+                flow.setVisible(True)
+            else:
+                flow.setVisible(False)
 
     def closeEvent(self, event) -> None:
         for flow in self.all_flows:

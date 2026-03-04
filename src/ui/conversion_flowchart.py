@@ -300,27 +300,39 @@ class ConversionFlowViewer(QWidget):
         settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, False)
 
-        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Ensure expansion dynamically
+        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
 
-        # Load the bundled HTML asset
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         html_path = os.path.join(base_dir, "assets", "conversion_pipeline.html")
         self._view.load(QUrl.fromLocalFile(html_path))
 
         lay.addWidget(self._view)
 
+    def sizeHint(self):
+        from PyQt6.QtCore import QSize
+        return QSize(2000, 580)
+        
+    def minimumSizeHint(self):
+        from PyQt6.QtCore import QSize
+        return QSize(800, 480)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         w = self.width()
         natural_w = 2440.0
-        natural_h = 580.0 # Absolute natural bounds of HTML + gap
+        natural_h = 580.0 
         
-        # Since HTML uses `document.documentElement.clientWidth` for width zoom
+        # Keep limits rigidly constrained based on zoom variables internally
         zoom = w / natural_w if w < natural_w else 1.0
         target_h = int(natural_h * zoom)
         
-        if self.maximumHeight() != target_h:
-            self.setFixedHeight(target_h)
+        # Enforce an explicit minimum height bound so that nested views don't collapse natively 
+        forced_h = max(target_h, 400)
+            
+        self.setMinimumHeight(forced_h)
+        self.setFixedHeight(forced_h)
+        self._view.setZoomFactor(zoom)
 
     def update_pipeline_state(self, stages_json: str) -> None:
         """Inject stage flags into the HTML pipeline. stages_json is a JSON string like
