@@ -82,3 +82,6 @@ class SearchBarWidget(QFrame):
         else:
             self.clear_btn.hide()
         self.search_query_changed.emit(text)
+
+    def get_query(self) -> str:
+        return self.input_field.text()

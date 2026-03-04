@@ -4,12 +4,14 @@ from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QScrollArea, QLabel, QLineEdit, QGraphicsBlurEffect, QDialog, QApplication, QFrame
+    QScrollArea, QLabel, QLineEdit, QGraphicsBlurEffect, QDialog, QApplication, QFrame,
+    QButtonGroup
 )
 
 from src.ui.dialogs.browser_modal import BrowserModalDialog
 from src.ui.dialogs.media_category import MediaCategoryDialog
 from src.ui.components.media_card import MediaCardWidget
+from src.ui.components.search_bar import SearchBarWidget
 from src.utils.formatting import format_size, format_speed
 from PyQt6.QtWebEngineCore import QWebEngineProfile
 
@@ -23,6 +25,10 @@ class SecureServerWindow(QMainWindow):
         
         # Wire global controller signals back to UI
         self.media_controller.torrents_updated.connect(self._update_qbit_ui_globally)
+        self.media_controller.title_resolved.connect(self._on_title_resolved)
+        self.media_controller.details_resolved.connect(self._on_details_resolved)
+        self.media_controller.image_downloaded.connect(self._on_image_downloaded)
+        self.media_controller.ssh_telemetry_updated.connect(self._on_ssh_telemetry_updated)
         
         self.setWindowTitle("Media Manager - Enterprise Dashboard")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -56,6 +62,38 @@ class SecureServerWindow(QMainWindow):
         self.btn_add_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_add_torrent.setObjectName("PrimaryButton")
         self.btn_add_torrent.clicked.connect(self._spawn_browser_modal_with_blur)
+        
+        # Movies / TV Series Toggle
+        self.toggle_container = QWidget()
+        self.toggle_container.setObjectName("ToggleContainer")
+        self.toggle_container.setFixedHeight(48)
+        toggle_layout = QHBoxLayout(self.toggle_container)
+        toggle_layout.setContentsMargins(4, 4, 4, 4)
+        toggle_layout.setSpacing(4)
+        
+        self.btn_movies = QPushButton("Movies")
+        self.btn_movies.setCheckable(True)
+        self.btn_movies.setChecked(True)
+        self.btn_movies.setObjectName("ToggleButton")
+        self.btn_movies.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_movies.setFixedSize(100, 40)
+        
+        self.btn_tv = QPushButton("TV Series")
+        self.btn_tv.setCheckable(True)
+        self.btn_tv.setObjectName("ToggleButton")
+        self.btn_tv.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_tv.setFixedSize(100, 40)
+        
+        self.toggle_group = QButtonGroup(self)
+        self.toggle_group.setExclusive(True)
+        self.toggle_group.addButton(self.btn_movies, 0)
+        self.toggle_group.addButton(self.btn_tv, 1)
+        
+        toggle_layout.addWidget(self.btn_movies)
+        toggle_layout.addWidget(self.btn_tv)
+        
+        self.current_media_filter = "Movies"
+        self.toggle_group.buttonClicked.connect(self._on_media_toggle_changed)
         
         # Refined functional search bar matching mockup design
         self.search_bar = SearchBarWidget(self)
@@ -97,6 +135,7 @@ class SecureServerWindow(QMainWindow):
         window_controls.addWidget(self.btn_close)
 
         nav_layout.addWidget(self.btn_add_torrent)
+        nav_layout.addWidget(self.toggle_container)
         nav_layout.addStretch(1)
         nav_layout.addWidget(self.search_bar)
         nav_layout.addStretch(1)           # Equal stretch after search → centers the bar
@@ -115,10 +154,11 @@ class SecureServerWindow(QMainWindow):
         # Scrollable content area with custom scrollbar
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        pass
+        self.scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; } QScrollArea > QWidget { background: transparent; }")
         
         self.scroll_content = QWidget()
-        self.scroll_content.setStyleSheet("background-color: transparent;")
+        self.scroll_content.setObjectName("ScrollContent")
+        self.scroll_content.setStyleSheet("QWidget#ScrollContent { background-color: #0A0B0E; }")
         self.flows_layout = QVBoxLayout(self.scroll_content)
         self.flows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.flows_layout.setSpacing(10)
@@ -142,13 +182,26 @@ class SecureServerWindow(QMainWindow):
             items = self.db_manager.get_all_items()
             for row in items:
                 index = len(self.all_flows) + 1
-                flow = MediaCardWidget(
-                    index=index,
-                    relative_path=row["relative_path"],
-                    title=row["title"],
-                    season=row.get("season", ""),
-                    parent=self.scroll_content
-                )
+                season_val = row.get("season", "")
+                
+                from src.ui.components.media_card import MediaCardWidget, SeriesCardWidget
+                
+                if season_val:
+                    flow = SeriesCardWidget(
+                        index=index,
+                        relative_path=row["relative_path"],
+                        title=row["title"],
+                        season=season_val,
+                        parent=self.scroll_content
+                    )
+                else:
+                    flow = MediaCardWidget(
+                        index=index,
+                        relative_path=row["relative_path"],
+                        title=row["title"],
+                        season="",
+                        parent=self.scroll_content
+                    )
                 
                 # Wire signals
                 flow.delete_confirmed.connect(self._on_flow_delete)
@@ -205,13 +258,24 @@ class SecureServerWindow(QMainWindow):
                 )
 
                 index = len(self.all_flows) + 1
-                flow = MediaCardWidget(
-                    index=index,
-                    relative_path=relative_path,
-                    title=title,
-                    season=season,
-                    parent=self.scroll_content
-                )
+                
+                from src.ui.components.media_card import MediaCardWidget, SeriesCardWidget
+                if season:
+                    flow = SeriesCardWidget(
+                        index=index,
+                        relative_path=relative_path,
+                        title=title,
+                        season=season,
+                        parent=self.scroll_content
+                    )
+                else:
+                    flow = MediaCardWidget(
+                        index=index,
+                        relative_path=relative_path,
+                        title=title,
+                        season="",
+                        parent=self.scroll_content
+                    )
                 
                 # Wire signals
                 flow.delete_confirmed.connect(self._on_flow_delete)
@@ -267,31 +331,48 @@ class SecureServerWindow(QMainWindow):
                 dlspeed = matched_t.get('dlspeed', 0)
                 size = matched_t.get('size', 0)
                 
-                is_done = state in ['uploading', 'stalledUP', 'pausedUP', 'completed', 'stalledDL'] and prog_val == 1.0
-                human_state = "Unknown"
-                
-                if is_done or prog_val == 1.0:
-                    human_state = "Completed"
-                    state_css = "PillSuccess"
-                    pb_style = "PbSuccess"
-                elif state in ['downloading', 'stalledDL'] and prog_val < 1.0:
-                    human_state = "Downloading"
-                    state_css = "PillActive"
-                    pb_style = "PbActive"
-                elif state in ['pausedDL', 'stopped', 'stoppedDL', 'checkingDL', 'checkingUP']:
-                    human_state = "Stopped"
-                    state_css = "PillUnknown"
-                    pb_style = "PbUnknown"
+                QBIT_STATE_MAP = {
+                    # ── Downloading group (Blue) ──────────────────────────────────
+                    "downloading":          ("Downloading",   "PillDownloading", "PbActive"),
+                    "stalledDL":            ("Stalled",       "PillDownloading", "PbActive"),
+                    "forcedDL":             ("Forced DL",     "PillDownloading", "PbActive"),
+                    "metaDL":               ("Fetching Meta", "PillDownloading", "PbActive"),
+                    "moving":               ("Moving",        "PillDownloading", "PbActive"),
+                    # ── Seeding / Completed group (Green) ────────────────────
+                    "uploading":            ("Seeding",       "PillSuccess",     "PbSuccess"),
+                    "stalledUP":            ("Stalled",       "PillSuccess",     "PbSuccess"),
+                    "forcedUP":             ("Forced UP",     "PillSuccess",     "PbSuccess"),
+                    # ── Completed ───────────────────────────────────────────
+                    "completed":            ("Completed",     "PillSuccess",     "PbSuccess"),
+                    # ── Paused group (Amber) ─────────────────────────────────
+                    "pausedDL":             ("Paused",        "PillPaused",      "PbUnknown"),
+                    "pausedUP":             ("Paused",        "PillPaused",      "PbUnknown"),
+                    # ── Checking / Processing group (Teal) ───────────────────
+                    "checkingDL":           ("Checking",      "PillChecking",    "PbUnknown"),
+                    "checkingUP":           ("Checking",      "PillChecking",    "PbUnknown"),
+                    "checkingResumeData":   ("Checking",      "PillChecking",    "PbUnknown"),
+                    "allocating":           ("Allocating",    "PillChecking",    "PbUnknown"),
+                    # ── Queued / Stopped group (Grey) ────────────────────────
+                    "queuedDL":             ("Queued",        "PillQueued",      "PbUnknown"),
+                    "queuedUP":             ("Queued",        "PillQueued",      "PbUnknown"),
+                    "stopped":              ("Stopped",       "PillQueued",      "PbUnknown"),
+                    "stoppedDL":            ("Stopped",       "PillQueued",      "PbUnknown"),
+                    "unknown":              ("Unknown",       "PillUnknown",     "PbUnknown"),
+                    # ── Error group (Red) ─────────────────────────────────────
+                    "missingFiles":         ("Missing Files", "PillDanger",      "PbUnknown"),
+                    "error":                ("Error",         "PillDanger",      "PbUnknown"),
+                }
+
+                if prog_val == 1.0:
+                    human_state, pill_class, pb_style = "Completed", "PillSuccess", "PbSuccess"
                 else:
-                    human_state = state.capitalize()
-                    state_css = "PillWarning"
-                    pb_style = "PbWarning"
+                    fallback = (state.replace("DL","").replace("UP","").strip().capitalize(), "PillWarning", "PbWarning")
+                    human_state, pill_class, pb_style = QBIT_STATE_MAP.get(state, fallback)
 
                 active_state_str = f"State: {human_state} | Progress: {int(prog_val * 100)}% | Size: {format_size(size)}"
-                
                 flow.update_torrent_ui(
                     human_state=human_state,
-                    state_css=state_css,
+                    pill_class=pill_class,
                     pb_style=pb_style,
                     prog_val=prog_val,
                     size_str=format_size(size),
@@ -299,12 +380,63 @@ class SecureServerWindow(QMainWindow):
                     active_state_str=active_state_str
                 )
 
+    def _on_title_resolved(self, flow_index: int, title: str) -> None:
+        for flow in self.all_flows:
+            if flow.flow_index == flow_index:
+                flow.title_lbl.setText(title)
+                break
+
+    def _on_details_resolved(self, flow_index: int, details: dict) -> None:
+        for flow in self.all_flows:
+            if flow.flow_index == flow_index:
+                desc = details.get("description", "No description available.")
+                genre = details.get("genre", "Unknown")
+                rating = details.get("rating", "-")
+                
+                # Keep current title, just update metadata fields
+                current_title = flow.title_lbl.text()
+                flow.update_metadata(current_title, desc, genre, rating)
+                break
+
+    def _on_image_downloaded(self, flow_index: int, image_bytes: bytes) -> None:
+        for flow in self.all_flows:
+            if flow.flow_index == flow_index:
+                from PyQt6.QtGui import QPixmap
+                pixmap = QPixmap()
+                if pixmap.loadFromData(image_bytes):
+                    flow.set_poster_pixmap(pixmap)
+                break
+
+    def _on_ssh_telemetry_updated(self, flow_index: int, json_payload: str) -> None:
+        import json
+        try:
+            episodes_data = json.loads(json_payload)
+        except Exception as e:
+            print(f"Failed to parse telemetry JSON: {e}")
+            episodes_data = []
+
+        for flow in self.all_flows:
+            if flow.flow_index == flow_index:
+                # Pass the raw array down to the card to handle
+                flow.update_telemetry_ui(episodes_data)
+                break
+
+    def _on_media_toggle_changed(self, button) -> None:
+        self.current_media_filter = button.text()
+        self._filter_media_list(self.search_bar.get_query())
+
     def _filter_media_list(self, query: str) -> None:
-        """Filter the displayed list of media cards based on the search query."""
+        """Filter the displayed list of media cards based on search and toggle category."""
         query = query.lower().strip()
         for flow in self.all_flows:
             title = flow.title_lbl.text().lower()
-            if not query or query in title:
+            matches_search = not query or query in title
+            
+            is_tv = bool(hasattr(flow, 'season') and getattr(flow, 'season'))
+            matches_category = (self.current_media_filter == "TV Series" and is_tv) or \
+                               (self.current_media_filter == "Movies" and not is_tv)
+            
+            if matches_search and matches_category:
                 flow.setVisible(True)
             else:
                 flow.setVisible(False)

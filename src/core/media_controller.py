@@ -37,7 +37,7 @@ class MediaController(QObject):
     title_resolved = pyqtSignal(int, str) # flow_index, title
     details_resolved = pyqtSignal(int, dict) # flow_index, details_dict
     image_downloaded = pyqtSignal(int, bytes) # flow_index, image_bytes
-    ssh_telemetry_updated = pyqtSignal(int, str, str, int, str, str, str) # db_status, sub_status, prog, gen_out, ff_out, flags
+    ssh_telemetry_updated = pyqtSignal(int, str) # flow_index, json_payload
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -113,8 +113,8 @@ class MediaController(QObject):
 
     def start_ssh_telemetry(self, flow_index: int, target_title: str):
         ssh_worker = SSHTelemetryClient(target_title=target_title, parent=self)
-        ssh_worker.telemetry_data.connect(lambda db, sub, prog, gen, ff, flags: 
-            self.ssh_telemetry_updated.emit(flow_index, db, sub, prog, gen, ff, flags)
+        ssh_worker.telemetry_data.connect(lambda json_payload: 
+            self.ssh_telemetry_updated.emit(flow_index, json_payload)
         )
         self._threads.append(ssh_worker)
         ssh_worker.start()
