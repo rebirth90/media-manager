@@ -219,12 +219,6 @@ class MediaCardWidget(QFrame):
         self.flowchart_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.foldout_layout.addWidget(self.flowchart_view)
 
-        # Legacy variables
-        self.lbl_speed_val = QLabel("0 kB/s")
-        self.lbl_foldout_db_status = QLabel("")
-        self.lbl_foldout_sub_status = QLabel("")
-        self.btn_send_conv = QPushButton()
-
         self.main_layout.addWidget(self.foldout_container)
 
     def eventFilter(self, obj, event):
@@ -324,6 +318,13 @@ class MediaCardWidget(QFrame):
             
         self.lbl_size_val.setText(size_str)
         self.prog_bar_dl.setValue(int(prog_val * 100))
+        
+        # RESTORES DOWNLOAD SPEED TO UI PROPERLY
+        is_idle = human_state in ["Completed", "Paused", "Seeding", "Stopped", "Queued", "Checking", "Error", "Missing Files"]
+        if is_idle or prog_val >= 1.0 or "0.0 MB/s" in speed_str:
+            self.lbl_speed_display.setText("-")
+        else:
+            self.lbl_speed_display.setText(speed_str)
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data:
@@ -331,8 +332,6 @@ class MediaCardWidget(QFrame):
             
         first_ep = episodes_data[0]
         db_status = first_ep.get("db_status", first_ep.get("status", "NOT STARTED")).upper()
-        sub_status = first_ep.get("sub_status", "Pending")
-        ff_out = first_ep.get("ff_tail", "")
         
         stage_flags_raw = first_ep.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
@@ -345,28 +344,27 @@ class MediaCardWidget(QFrame):
             stage_flags = stage_flags_raw.copy() if stage_flags_raw else {}
 
         self._active_qbit_state = f"DB Status: {db_status}"
-        self._active_ffmpeg_log = ff_out
         
         from src.ui.components.progress_pill import calculate_conversion_progress
         state_text, percentage = calculate_conversion_progress(first_ep)
         
-        # COMPLETION OVERRIDE - USING "pass" STRING INSTEAD OF TRUE
+        # USE TRUE INSTEAD OF STRINGS FOR COMPLETION
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
-            stage_flags["p8-complete"] = "pass"
+            stage_flags["p8-complete"] = True
             
             if not any(k.startswith("p3-") for k in stage_flags):
-                stage_flags["p1-input"] = "pass"; stage_flags["p1-queue"] = "pass"
-                stage_flags["p2-dequeue"] = "pass"; stage_flags["p2-pass"] = "pass"
-                stage_flags["p3-router"] = "pass"
+                stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
+                stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
+                stage_flags["p3-router"] = True
                 is_tv = bool(getattr(self, 'season', False))
-                stage_flags["p3-tv" if is_tv else "p3-movie"] = "pass"
-                stage_flags["p4-tv" if is_tv else "p4-movie"] = "pass"
-                stage_flags["p5-check"] = "pass"; stage_flags["p5-pass"] = "pass"
-                stage_flags["p8-relocate"] = "pass"
-                stage_flags["p8-tv" if is_tv else "p8-movie"] = "pass"
-                stage_flags["p8-cleanup"] = "pass"
+                stage_flags["p3-tv" if is_tv else "p3-movie"] = True
+                stage_flags["p4-tv" if is_tv else "p4-movie"] = True
+                stage_flags["p5-check"] = True; stage_flags["p5-pass"] = True
+                stage_flags["p8-relocate"] = True
+                stage_flags["p8-tv" if is_tv else "p8-movie"] = True
+                stage_flags["p8-cleanup"] = True
 
         pill_css = "PillUnknown"
         if state_text == "Completed": pill_css = "PillSuccess"
@@ -380,9 +378,6 @@ class MediaCardWidget(QFrame):
             self.lbl_conv_status.style().polish(self.lbl_conv_status)
 
         self.prog_pill_conv.set_data(state_text, percentage)
-        
-        self.lbl_foldout_db_status.setText(f"Conversion Status: {state_text}")
-        self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
         if hasattr(self, 'flowchart_view'):
             self.flowchart_view.update_pipeline_state(stage_flags)
@@ -399,7 +394,6 @@ class EpisodeRowWidget(QWidget):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
         
-        # --- Top Bar ---
         self.top_bar = QWidget()
         self.top_bar.setObjectName("EpisodeTopBar") 
         self.top_bar.setFixedHeight(64)
@@ -410,19 +404,16 @@ class EpisodeRowWidget(QWidget):
         top_layout.setContentsMargins(16, 0, 16, 0)
         top_layout.setSpacing(16)
         
-        # Badge
         self.badge = QLabel("EP")
         self.badge.setFixedSize(40, 40)
         self.badge.setObjectName("EpisodeBadge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top_layout.addWidget(self.badge)
         
-        # Title
         self.title_lbl = QLabel(ep_name)
         self.title_lbl.setObjectName("TitleText")
         top_layout.addWidget(self.title_lbl, 1)
         
-        # Conv Status
         status_v = QVBoxLayout()
         status_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_v.setSpacing(4)
@@ -436,7 +427,6 @@ class EpisodeRowWidget(QWidget):
         status_v.addWidget(self.lbl_conv_status)
         top_layout.addLayout(status_v)
 
-        # Conv Progress
         prog_v = QVBoxLayout()
         prog_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
         prog_v.setSpacing(4)
@@ -449,7 +439,6 @@ class EpisodeRowWidget(QWidget):
         prog_v.addWidget(self.prog_pill_conv)
         top_layout.addLayout(prog_v)
         
-        # Chevron
         self.btn_expand = QPushButton()
         chev_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "assets", "chevron_down.svg")
         self.btn_expand.setIcon(QIcon(chev_path))
@@ -462,7 +451,6 @@ class EpisodeRowWidget(QWidget):
         
         self.main_layout.addWidget(self.top_bar)
         
-        # --- Flowchart Foldout ---
         self.foldout = QWidget()
         self.foldout.setVisible(False)
         self.foldout.setMaximumHeight(0)
@@ -532,15 +520,15 @@ class EpisodeRowWidget(QWidget):
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
-            stage_flags["p8-complete"] = "pass"
+            stage_flags["p8-complete"] = True
             
             if not any(k.startswith("p3-") for k in stage_flags):
-                stage_flags["p1-input"] = "pass"; stage_flags["p1-queue"] = "pass"
-                stage_flags["p2-dequeue"] = "pass"; stage_flags["p2-pass"] = "pass"
-                stage_flags["p3-router"] = "pass"; stage_flags["p3-tv"] = "pass"
-                stage_flags["p4-tv"] = "pass"; stage_flags["p5-check"] = "pass"
-                stage_flags["p5-pass"] = "pass"; stage_flags["p8-relocate"] = "pass"
-                stage_flags["p8-tv"] = "pass"; stage_flags["p8-cleanup"] = "pass"
+                stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
+                stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
+                stage_flags["p3-router"] = True; stage_flags["p3-tv"] = True
+                stage_flags["p4-tv"] = True; stage_flags["p5-check"] = True
+                stage_flags["p5-pass"] = True; stage_flags["p8-relocate"] = True
+                stage_flags["p8-tv"] = True; stage_flags["p8-cleanup"] = True
 
         pill_css = "PillUnknown"
         if state_text == "Completed": pill_css = "PillSuccess"

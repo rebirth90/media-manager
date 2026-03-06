@@ -24,7 +24,6 @@ class SecureServerWindow(QMainWindow):
         self.shared_profile = shared_profile
         self.media_controller = media_controller
         
-        # Wire global controller signals back to DB writers (not UI directly anymore!)
         self.media_controller.torrents_updated.connect(self._update_qbit_db_globally)
         self.media_controller.title_resolved.connect(self._on_title_resolved)
         self.media_controller.details_resolved.connect(self._on_details_resolved)
@@ -43,7 +42,6 @@ class SecureServerWindow(QMainWindow):
         self.main_layout.setContentsMargins(0, 0, 0, 25)
         self.main_layout.setSpacing(0)
 
-        # White Header Container
         self.header_container = QWidget()
         self.header_container.setObjectName("HeaderContainer")
         self.header_container.setFixedHeight(72)
@@ -139,7 +137,6 @@ class SecureServerWindow(QMainWindow):
         self.db_manager = LocalDBManager()
         self._restore_saved_flows()
 
-        # DECOUPLED SYNC ENGINE: Pulls state entirely from Local DB unconditionally
         self.db_sync_timer = QTimer(self)
         self.db_sync_timer.timeout.connect(self._sync_ui_from_db)
         self.db_sync_timer.start(1500)
@@ -154,14 +151,22 @@ class SecureServerWindow(QMainWindow):
                 db_row = item_dict.get(flow.db_id)
                 if not db_row: continue
                 
-                # 1. Sync Metadata
+                # 1. Sync Metadata safely avoiding tmdb prefixes
                 desc = db_row.get("description")
+                title = db_row.get("title", flow.title)
+                
+                if title.startswith("tmdb:"):
+                    title = flow.title
+                    
                 if desc:
-                    flow.update_metadata(flow.title_lbl.text(), desc, db_row.get("genre", "Unknown"), db_row.get("rating", "-"))
+                    flow.update_metadata(title, desc, db_row.get("genre", "Unknown"), db_row.get("rating", "-"))
+                elif title != flow.title:
+                    flow.update_metadata(title, "No description available.", "Unknown", "-")
                     
                 # 2. Sync Torrent Data
                 t_data = db_row.get("torrent_data")
                 if t_data:
+                    import json
                     try:
                         t_info = json.loads(t_data)
                         flow.update_torrent_ui(
@@ -170,7 +175,7 @@ class SecureServerWindow(QMainWindow):
                             pb_style=t_info.get("pb_style", "PbUnknown"),
                             prog_val=t_info.get("prog_val", 0.0),
                             size_str=t_info.get("size_str", "0 B"),
-                            speed_str=t_info.get("speed_str", "-"),
+                            speed_str=t_info.get("speed_str", "0.0 MB/s"),
                             active_state_str=t_info.get("active_state_str", "")
                         )
                     except Exception: pass
@@ -178,13 +183,14 @@ class SecureServerWindow(QMainWindow):
                 # 3. Sync Conversion Data
                 c_data = db_row.get("conversion_data")
                 if c_data:
+                    import json
                     try:
                         c_info = json.loads(c_data)
                         if isinstance(c_info, dict): c_info = [c_info]
                         flow.update_telemetry_ui(c_info)
                     except Exception: pass
         except Exception as e:
-            print(f"Error syncing UI from DB: {e}")
+            pass
 
     def _restore_saved_flows(self) -> None:
         try:
@@ -203,11 +209,11 @@ class SecureServerWindow(QMainWindow):
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
                 
-                # Check DB for completion state to apply GUARDRAILS
                 conversion_completed = False
                 c_data = row.get("conversion_data") or self.db_manager.get_conversion_cache(row["relative_path"].replace("\\", "/"))
                 if c_data:
                     try:
+                        import json
                         c_info = json.loads(c_data)
                         if isinstance(c_info, dict): c_info = [c_info]
                         if c_info and all(ep.get("db_status", "NOT STARTED").upper() in ["COMPLETED", "FAILED", "REJECTED"] for ep in c_info):
@@ -218,6 +224,7 @@ class SecureServerWindow(QMainWindow):
                 t_data = row.get("torrent_data") or self.db_manager.get_torrent_cache_by_path(row["relative_path"].replace("\\", "/"))
                 if t_data:
                     try:
+                        import json
                         t_info = json.loads(t_data)
                         if t_info.get("prog_val", 0.0) >= 1.0 or t_info.get("progress", 0.0) >= 1.0:
                             torrent_completed = True
@@ -226,7 +233,6 @@ class SecureServerWindow(QMainWindow):
                 flow.conversion_completed = conversion_completed
                 flow.torrent_completed = torrent_completed
                 
-                # GUARDRAIL 1: DO NOT FETCH TELEMETRY IF COMPLETED
                 if not conversion_completed:
                     raw_title = row["title"]
                     if raw_title.startswith("tmdb:"):
@@ -248,11 +254,9 @@ class SecureServerWindow(QMainWindow):
                     image_url=row.get("image_url", ""),
                     is_restored=True
                 )
-            
-            # Instantly update UI on load
             self._sync_ui_from_db()
         except Exception as e:
-            print(f"Failed to restore media flows: {e}")
+            pass
 
     def _spawn_browser_modal_with_blur(self) -> None:
         if self._modal_open: return
@@ -321,11 +325,8 @@ class SecureServerWindow(QMainWindow):
             self.all_flows.remove(flow_widget)
         self.flows_layout.removeWidget(flow_widget)
 
-    # --- DB WRITING METHODS (These now simply populate the DB, they don't touch the UI directly) ---
-
     def _update_qbit_db_globally(self, torrents_list: list) -> None:
         for flow in self.all_flows:
-            # GUARDRAIL 2: DO NOT PROCESS TORRENT IF MARKED AS COMPLETED
             if getattr(flow, 'torrent_completed', False):
                 continue
                 
@@ -373,10 +374,11 @@ class SecureServerWindow(QMainWindow):
 
                 if prog_val == 1.0:
                     human_state, pill_class, pb_style = "Completed", "PillSuccess", "PbSuccess"
-                    flow.torrent_completed = True # Locks Guardrail
+                    flow.torrent_completed = True
                     
                     target_path = flow.relative_path.replace("\\", "/")
                     if not self.db_manager.get_torrent_cache_by_path(target_path):
+                        import json
                         self.db_manager.set_torrent_cache(matched_t.get("hash", ""), target_path, json.dumps(matched_t))
                         self.media_controller.request_conversion(flow.relative_path)
                 else:
@@ -385,6 +387,7 @@ class SecureServerWindow(QMainWindow):
 
                 active_state_str = f"State: {human_state} | Progress: {int(prog_val * 100)}% | Size: {format_size(size)}"
                 
+                import json
                 t_info = {
                     "human_state": human_state,
                     "pill_class": pill_class,
@@ -399,14 +402,12 @@ class SecureServerWindow(QMainWindow):
     def _on_title_resolved(self, flow_index: int, title: str) -> None:
         for flow in self.all_flows:
             if flow.flow_index == flow_index:
-                if hasattr(flow, 'db_id') and flow.db_id and str(flow.title_lbl.text()).startswith("tmdb:"):
+                if getattr(flow, 'db_id', None):
                     self.db_manager.update_item_title(flow.db_id, title)
-                elif hasattr(flow, 'db_id') and flow.db_id:
-                    all_items = self.db_manager.get_all_items()
-                    for item in all_items:
-                        if item['id'] == flow.db_id and item['title'].startswith('tmdb:'):
-                            self.db_manager.update_item_title(flow.db_id, title)
-                            break
+                # Overwrite internal title flag instantly and rewrite the front-end label
+                flow.title = title
+                season = getattr(flow, 'season', "")
+                flow.title_lbl.setText(f"{title} — {season}" if season else title)
                 break
 
     def _on_details_resolved(self, flow_index: int, details: dict) -> None:
@@ -430,10 +431,10 @@ class SecureServerWindow(QMainWindow):
     def _on_ssh_telemetry_updated(self, flow_index: int, json_payload: str) -> None:
         for flow in self.all_flows:
             if flow.flow_index == flow_index and getattr(flow, 'db_id', None):
-                # Purely write to DB. The sync loop handles UI painting!
                 self.db_manager.update_conversion_data(flow.db_id, json_payload)
                 
                 try:
+                    import json
                     episodes_data = json.loads(json_payload)
                     if isinstance(episodes_data, dict): episodes_data = [episodes_data]
                     
@@ -445,13 +446,11 @@ class SecureServerWindow(QMainWindow):
                             break
                             
                     if all_finished and episodes_data:
-                        flow.conversion_completed = True # Locks Guardrail
+                        flow.conversion_completed = True 
                         self.db_manager.set_conversion_cache(flow.relative_path.replace("\\", "/"), json.dumps(episodes_data))
                 except Exception:
                     pass
                 break
-
-    # --- END DB WRITING METHODS ---
 
     def _on_media_toggle_changed(self, index: int) -> None:
         self.current_media_filter = "Movies" if index == 0 else "TV Series"

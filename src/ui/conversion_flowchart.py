@@ -314,10 +314,12 @@ class ConversionFlowViewer(QWidget):
             ]
             flags = {k: False for k in all_keys}
             
-            # Persist original strings (like "skip" or "pass") to avoid breaking CSS
             for k, v in raw_flags.items():
                 if k in flags:
-                    flags[k] = v
+                    if isinstance(v, str):
+                        flags[k] = v.lower() not in ('false', '0', '')
+                    else:
+                        flags[k] = bool(v)
 
             # Enforce Branch Exclusivity
             if flags.get("p3-movie") or flags.get("p4-movie") or flags.get("p8-movie"):
@@ -332,8 +334,8 @@ class ConversionFlowViewer(QWidget):
             elif flags.get("p2-fail"): flags["p2-pass"] = False
 
             if flags.get("p8-complete"):
-                flags["p8-cleanup"] = flags.get("p8-cleanup") or "pass"
-                flags["p8-relocate"] = flags.get("p8-relocate") or "pass"
+                flags["p8-cleanup"] = flags.get("p8-cleanup") or True
+                flags["p8-relocate"] = flags.get("p8-relocate") or True
 
             clean_json = json.dumps(flags)
             
@@ -346,7 +348,6 @@ class ConversionFlowViewer(QWidget):
             if not self._page_loaded:
                 return
 
-            # Advanced UI Dimming Javascript Payload
             js = f"""
             if (window.setPipelineState) {{ 
                 window.setPipelineState({clean_json}); 
@@ -358,7 +359,9 @@ class ConversionFlowViewer(QWidget):
                 Object.keys(flags).forEach(key => {{
                     const el = document.getElementById(key);
                     if (el) {{
-                        if (flags[key]) {{
+                        const isActive = flags[key] === true;
+                        
+                        if (isActive) {{
                             el.style.opacity = '1.0';
                             el.style.filter = 'none';
                         }} else {{
@@ -378,8 +381,8 @@ class ConversionFlowViewer(QWidget):
                     
                     Object.keys(flags).forEach(k => {{
                         if (id.includes(k) || cls.includes(k)) {{
-                            if (!flags[k]) linkedToFalse = true;
-                            if (flags[k]) linkedToTrue = true;
+                            if (flags[k] === false) linkedToFalse = true;
+                            if (flags[k] === true) linkedToTrue = true;
                         }}
                     }});
                     

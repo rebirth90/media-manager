@@ -73,18 +73,18 @@ try:
         if max_idx >= 0:
             for i in range(max_idx):
                 if linear_path[i] not in flags:
-                    flags[linear_path[i]] = "skip"
+                    flags[linear_path[i]] = True
 
         if db_status.upper() == "COMPLETED":
             for c in linear_path:
                 if c not in flags:
-                    flags[c] = "pass"
+                    flags[c] = True
             
             if not any(k in flags for k in ["p3-movie", "p3-tv"]):
                 if "tv" in db_path.lower() or "season" in db_path.lower() or re.search(r's\\d{{2}}e\\d{{2}}', db_path.lower()):
-                    flags["p3-tv"] = "pass"; flags["p4-tv"] = "pass"; flags["p8-tv"] = "pass"
+                    flags["p3-tv"] = True; flags["p4-tv"] = True; flags["p8-tv"] = True
                 else:
-                    flags["p3-movie"] = "pass"; flags["p4-movie"] = "pass"; flags["p8-movie"] = "pass"
+                    flags["p3-movie"] = True; flags["p4-movie"] = True; flags["p8-movie"] = True
                     
         words = [w.lower() for w in re.split(r'\\W+', db_path) if len(w) > 3 and not w.isdigit()]
         ignore = ['action', 'comedy', 'movies', 'scratch', 'data', 'dvdrip', 'xvid', 'x264', '1080p', '720p', 'web', 'dl', 'aac2', 'h264', 'mkv', 'avi', 'mp4']
@@ -140,10 +140,9 @@ try:
                         curr_s = int(ch)*3600 + int(cm)*60 + int(cs)
                         ff_prog = min(int((curr_s / total_s) * 100), 100)
                         
-                        # Instantly free UI from the heuristics hold if timestamps exist
-                        flags["p7-heuristics"] = "pass"
-                        flags["p7-audio"] = "pass"
-                        flags["p7-t2"] = "active" 
+                        flags["p7-heuristics"] = True
+                        flags["p7-audio"] = True
+                        flags["p7-t2"] = True 
             except: pass
             
         results.append({{
