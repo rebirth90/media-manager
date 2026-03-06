@@ -25,6 +25,7 @@ cards = {}
 paths_to_draw = []
 
 class FlowWidget(QWidget):
+    """The main canvas where SVG-like arrows are drawn under the widgets."""
     def __init__(self, bg_color=None, spine_color=None, parent=None):
         super().__init__(parent)
         self._bg_color = bg_color or Bg
@@ -34,9 +35,15 @@ class FlowWidget(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Background
         painter.fillRect(self.rect(), QColor(self._bg_color))
+        
+        # Draw spine timeline track
         painter.setPen(QPen(QColor(self._spine_color), 1, Qt.PenStyle.DashLine))
         painter.drawLine(100, 93, self.width() - 100, 93)
+        
+        # Draw paths
         for path, color_hex, dashed in paths_to_draw:
             pen = QPen(QColor(color_hex), 2)
             if dashed:
@@ -44,31 +51,47 @@ class FlowWidget(QWidget):
                 pen.setDashPattern([5, 4])
             painter.setPen(pen)
             painter.drawPath(path)
+            
+            # Arrowheads
             if path.elementCount() > 1:
                 p2 = path.elementAt(path.elementCount() - 1)
                 p1 = path.elementAt(path.elementCount() - 2)
                 self.draw_arrowhead(painter, p1, p2, color_hex)
                 
     def draw_arrowhead(self, painter, p1, p2, color_hex):
-        if p1.x == p2.x and p1.y == p2.y: return
+        if p1.x == p2.x and p1.y == p2.y:
+            return
+            
         dx = p2.x - p1.x
         dy = p2.y - p1.y
         angle = math.atan2(dy, dx)
+        
         arrow_len = 8
+        
         p_tip = QPointF(p2.x, p2.y)
         p_left = QPointF(p2.x - arrow_len * math.cos(angle - 0.5), p2.y - arrow_len * math.sin(angle - 0.5))
         p_right = QPointF(p2.x - arrow_len * math.cos(angle + 0.5), p2.y - arrow_len * math.sin(angle + 0.5))
+        
         poly = QPolygonF([p_tip, p_left, p_right])
         painter.setBrush(QBrush(QColor(color_hex)))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon(poly)
 
+# --- Routing Engine Helpers ---
 def G(id_str):
     if id_str not in cards: return None
     widget = cards[id_str]
     rect = widget.geometry()
     pos = widget.mapTo(main_widget, rect.topLeft())
-    return {'top': pos.y(), 'bottom': pos.y() + rect.height(), 'left': pos.x(), 'right': pos.x() + rect.width(), 'cx': pos.x() + rect.width() / 2, 'cy': pos.y() + rect.height() / 2, 'h': rect.height()}
+    return {
+        'top': pos.y(),
+        'bottom': pos.y() + rect.height(),
+        'left': pos.x(),
+        'right': pos.x() + rect.width(),
+        'cx': pos.x() + rect.width() / 2,
+        'cy': pos.y() + rect.height() / 2,
+        'h': rect.height(),
+    }
 
 def colOf(id_str):
     w = cards[id_str]
@@ -84,8 +107,11 @@ def gapCX(id_str):
         return (col.geometry().right() + next_col.geometry().left()) / 2
     return col.geometry().right() + 40
 
-def colRX(id_str): return colOf(id_str).geometry().right()
-def colLX(id_str): return colOf(id_str).geometry().left()
+def colRX(id_str):
+    return colOf(id_str).geometry().right()
+
+def colLX(id_str):
+    return colOf(id_str).geometry().left()
 
 def mp(path_str, color_hex, dashed=False):
     path = QPainterPath()
@@ -95,11 +121,14 @@ def mp(path_str, color_hex, dashed=False):
         cmd = parts[i]
         x = float(parts[i+1])
         y = float(parts[i+2])
-        if cmd == 'M': path.moveTo(x, y)
-        elif cmd == 'L': path.lineTo(x, y)
+        if cmd == 'M':
+            path.moveTo(x, y)
+        elif cmd == 'L':
+            path.lineTo(x, y)
         i += 3
     paths_to_draw.append((path, color_hex, dashed))
 
+# --- SVG Recreations ---
 def V(fromId, toId, c, x=None):
     f, t = G(fromId), G(toId)
     if not f or not t: return
@@ -135,6 +164,7 @@ def LOOP_BACK(fromId, toId, c, laneOff=0):
     lx = colLX(toId) - 18
     mp(f"M {f['right']+2} {f['cy']} L {rx} {f['cy']} L {rx} {laneY} L {lx} {laneY} L {lx} {t['top']-10} L {t['cx']} {t['top']-10} L {t['cx']} {t['top']-2}", c, dashed=True)
 
+# --- Component Builders ---
 def make_card(id_str, title, body, color_hex, body_color=None):
     _body_color = body_color or "#dde7f5"
     _card_bg = CardBg
@@ -142,7 +172,11 @@ def make_card(id_str, title, body, color_hex, body_color=None):
     c.setObjectName("card")
     c.setFixedWidth(210)
     c.setStyleSheet(f"""
-        QFrame#card {{ background-color: {_card_bg}; border-radius: 8px; border-left: 3px solid {color_hex}; }}
+        QFrame#card {{
+            background-color: {_card_bg};
+            border-radius: 8px;
+            border-left: 3px solid {color_hex};
+        }}
         QLabel#title {{ color: {color_hex}; font-size: 11px; font-weight: bold; background: transparent; }}
         QLabel#body {{ color: {_body_color}; font-size: 10px; background: transparent; }}
         QWidget#dot {{ background-color: {color_hex}; border-radius: 3px; }}
@@ -150,24 +184,30 @@ def make_card(id_str, title, body, color_hex, body_color=None):
     lay = QVBoxLayout(c)
     lay.setContentsMargins(10, 10, 10, 10)
     lay.setSpacing(6)
+    
     t_row = QWidget()
     t_row.setStyleSheet("background: transparent;")
     t_lay = QHBoxLayout(t_row)
     t_lay.setContentsMargins(0, 0, 0, 0)
     t_lay.setSpacing(6)
+    
     dot = QWidget()
     dot.setObjectName("dot")
     dot.setFixedSize(6, 6)
     t_lay.addWidget(dot)
+    
     lbl_t = QLabel(title)
     lbl_t.setObjectName("title")
     t_lay.addWidget(lbl_t)
     t_lay.addStretch()
+    
     lay.addWidget(t_row)
+    
     lbl_b = QLabel(body)
     lbl_b.setObjectName("body")
     lbl_b.setWordWrap(True)
     lay.addWidget(lbl_b)
+    
     cards[id_str] = c
     return c
 
@@ -178,21 +218,29 @@ def make_phase_col(num, label, color_hex):
     lay.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(25)
+    
     header = QWidget()
     header.setFixedSize(86, 86)
     header.setStyleSheet(f"""
-        QWidget {{ background-color: {CardBg}; border-radius: 43px; border: 2px solid rgba({int(color_hex[1:3], 16)}, {int(color_hex[3:5], 16)}, {int(color_hex[5:7], 16)}, 0.4); }}
+        QWidget {{
+            background-color: {CardBg}; border-radius: 43px;
+            border: 2px solid rgba({int(color_hex[1:3], 16)}, {int(color_hex[3:5], 16)}, {int(color_hex[5:7], 16)}, 0.4);
+        }}
     """)
     h_lay = QVBoxLayout(header)
     h_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    
     l_num = QLabel(num)
     l_num.setStyleSheet(f"color: {color_hex}; font-size: 22px; font-weight: bold; background: transparent;")
     l_num.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    
     l_lbl = QLabel(label.upper())
     l_lbl.setStyleSheet(f"color: {Muted}; font-size: 10px; font-weight: bold; letter-spacing: 1px; background: transparent;")
     l_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    
     h_lay.addWidget(l_num)
     h_lay.addWidget(l_lbl)
+    
     lay.addWidget(header, alignment=Qt.AlignmentFlag.AlignHCenter)
     return w
 
@@ -216,10 +264,12 @@ def make_tier_box(children, light=False):
     lay = QVBoxLayout(w)
     lay.setContentsMargins(10, 0, 0, 0)
     lay.setSpacing(20)
+    
     lbl_color = "#7c3aed" if light else Pu
     lbl = QLabel("TIERED FALLBACK LOOP")
     lbl.setStyleSheet(f"color: {lbl_color}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
     lay.addWidget(lbl)
+    
     for c in children:
         c.setFixedWidth(190)
         lay.addWidget(c)
@@ -230,34 +280,37 @@ class ConversionFlowViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         import os
-        from PyQt6.QtWidgets import QSizePolicy, QGraphicsOpacityEffect
+        from PyQt6.QtWidgets import QSizePolicy
         from PyQt6.QtWebEngineWidgets import QWebEngineView
         from PyQt6.QtWebEngineCore import QWebEngineSettings
-        from PyQt6.QtCore import QUrl, QPropertyAnimation, QEasingCurve
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QColor
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
 
         self._view = QWebEngineView()
-        self._page_loaded = False
-        self._pending_json = None
 
+        # Transparent background matching the dark theme foldout UI
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
 
+        # Allow local content to fetch Google Fonts (remote resources)
         settings = self._view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, False)
 
+        # Ensure expansion dynamically
         self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
-
-        self._view.loadFinished.connect(self._on_load_finished)
 
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         html_path = os.path.join(base_dir, "assets", "conversion_pipeline.html")
         self._view.load(QUrl.fromLocalFile(html_path))
         lay.addWidget(self._view)
 
+        # Apply smooth opacity fade-in
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
         self.opacity_effect = QGraphicsOpacityEffect(self._view)
         self._view.setGraphicsEffect(self.opacity_effect)
         self.opacity_effect.setOpacity(0.0)
@@ -267,13 +320,8 @@ class ConversionFlowViewer(QWidget):
         self.fade_anim.setStartValue(0.0)
         self.fade_anim.setEndValue(1.0)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-
-    def _on_load_finished(self, ok):
-        if ok:
-            self._page_loaded = True
-            self.fade_anim.start()
-            if self._pending_json:
-                self.update_pipeline_state(self._pending_json)
+        
+        self._view.loadFinished.connect(lambda ok: self.fade_anim.start() if ok else None)
 
     def sizeHint(self):
         from PyQt6.QtCore import QSize
@@ -284,138 +332,56 @@ class ConversionFlowViewer(QWidget):
         return QSize(800, 480)
 
     def resizeEvent(self, event):
-        if event is not None:
-            super().resizeEvent(event)
+        super().resizeEvent(event)
         w = self.width()
         natural_w = 2440.0
         natural_h = 580.0 
+        
+        # Keep limits rigidly constrained based on zoom variables internally
         zoom = w / natural_w if w < natural_w else 1.0
         target_h = int(natural_h * zoom)
+        
+        # Enforce an explicit minimum height bound so that nested views don't collapse natively 
         forced_h = max(target_h, 400)
+            
         self.setMinimumHeight(forced_h)
         self.setFixedHeight(forced_h)
         self._view.setZoomFactor(zoom)
 
-    def update_pipeline_state(self, stages_data) -> None:
+    def update_pipeline_state(self, stages_json: str) -> None:
+        """Inject stage flags into the HTML pipeline. stages_json is a JSON string like
+        '{"p1-input": true, "p2-dequeue": true, ...}'.
+        """
+        # Sanitise: ensure it's valid JSON before injecting
         try:
             import json
-            
-            if isinstance(stages_data, str):
-                raw_flags = json.loads(stages_data) if stages_data else {}
-            else:
-                raw_flags = stages_data.copy() if stages_data else {}
-                
-            all_keys = [
-                "p1-input", "p1-queue", "p2-dequeue", "p2-fail", "p2-pass",
-                "p3-router", "p3-movie", "p3-tv", "p4-movie", "p4-tv",
-                "p5-check", "p5-fail", "p5-pass", "p6-discovery", "p6-vobsub", "p6-text",
-                "p7-heuristics", "p7-audio", "p7-t1", "p7-t2", "p7-t3", "p7-outcome",
-                "p8-relocate", "p8-movie", "p8-tv", "p8-cleanup", "p8-complete"
-            ]
-            flags = {k: False for k in all_keys}
-            
-            for k, v in raw_flags.items():
-                if k in flags:
-                    if isinstance(v, str):
-                        flags[k] = v.lower() not in ('false', '0', '')
-                    else:
-                        flags[k] = bool(v)
-
-            # Enforce Branch Exclusivity
-            if flags.get("p3-movie") or flags.get("p4-movie") or flags.get("p8-movie"):
-                for key in ["p3-tv", "p4-tv", "p8-tv"]: flags[key] = False
-            elif flags.get("p3-tv") or flags.get("p4-tv") or flags.get("p8-tv"):
-                for key in ["p3-movie", "p4-movie", "p8-movie"]: flags[key] = False
-                    
-            if flags.get("p5-pass"): flags["p5-fail"] = False
-            elif flags.get("p5-fail"): flags["p5-pass"] = False
-            
-            if flags.get("p2-pass"): flags["p2-fail"] = False
-            elif flags.get("p2-fail"): flags["p2-pass"] = False
-
-            if flags.get("p8-complete"):
-                flags["p8-cleanup"] = flags.get("p8-cleanup") or True
-                flags["p8-relocate"] = flags.get("p8-relocate") or True
-
-            clean_json = json.dumps(flags)
-            
-            if getattr(self, '_last_json', None) == clean_json:
-                return
-            
-            self._last_json = clean_json
-            self._pending_json = clean_json
-            
-            if not self._page_loaded:
-                return
-
-            js = f"""
-            if (window.setPipelineState) {{ 
-                window.setPipelineState({clean_json}); 
-            }}
-            
-            setTimeout(() => {{
-                const flags = {clean_json};
-                
-                Object.keys(flags).forEach(key => {{
-                    const el = document.getElementById(key);
-                    if (el) {{
-                        const isActive = flags[key] === true;
-                        
-                        if (isActive) {{
-                            el.style.opacity = '1.0';
-                            el.style.filter = 'none';
-                        }} else {{
-                            el.style.opacity = '0.35';
-                            el.style.filter = 'grayscale(100%)';
-                            el.style.transition = 'opacity 0.5s ease';
-                        }}
-                    }}
-                }});
-                
-                document.querySelectorAll('path, line, polyline, polygon').forEach(svg => {{
-                    const id = (svg.id || '').toLowerCase();
-                    const cls = (svg.getAttribute('class') || '').toLowerCase();
-                    
-                    let linkedToFalse = false;
-                    let linkedToTrue = false;
-                    
-                    Object.keys(flags).forEach(k => {{
-                        if (id.includes(k) || cls.includes(k)) {{
-                            if (flags[k] === false) linkedToFalse = true;
-                            if (flags[k] === true) linkedToTrue = true;
-                        }}
-                    }});
-                    
-                    if (linkedToFalse && !linkedToTrue) {{
-                        svg.style.opacity = '0.15';
-                        svg.style.stroke = '#334155';
-                        svg.style.transition = 'opacity 0.5s ease, stroke 0.5s ease';
-                    }} else if (linkedToTrue) {{
-                        svg.style.opacity = '1.0';
-                        svg.style.stroke = ''; 
-                    }}
-                }});
-            }}, 50);
-            """
-            self._view.page().runJavaScript(js)
-            
+            json.loads(stages_json)  # validate
         except Exception:
             return
+        js = f"if (window.setPipelineState) {{ window.setPipelineState({stages_json}); }}"
+        self._view.page().runJavaScript(js)
+
+
+
 
 class TimelineApp(QMainWindow):
+    """Standalone window for running the flowchart independently."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("🎬 Media Manager Conversion Pipeline")
         self.resize(1500, 800)
+        
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
+        
         global main_widget, main_layout
         main_widget = FlowWidget()
         main_layout = QHBoxLayout(main_widget)
         main_layout.setSpacing(80)
         main_layout.setContentsMargins(50, 50, 50, 300)
         main_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+        
         _build_pipeline_ui()
         scroll.setWidget(main_widget)
         self.setCentralWidget(scroll)
@@ -424,36 +390,53 @@ class TimelineApp(QMainWindow):
         super().showEvent(event)
         QTimer.singleShot(100, lambda: _build_pipeline_arrows())
 
+
+# --- Shared Pipeline Construction ---
 def _build_pipeline_ui(light=False):
+    """Builds all phase columns and cards into main_layout."""
     bc = _LIGHT_BODY_COLOR if light else None
+
+    # Phase 1
     p1 = make_phase_col("01", "Ingest", T)
     p1.layout().addWidget(make_card("p1-input", "User Input", "Add media path to conversion.txt", T, bc))
     p1.layout().addWidget(make_card("p1-queue", "Queue Management", "DatabaseManager reads file\nAdds to SQLite as PENDING", T, bc))
     main_layout.addWidget(p1)
+    
+    # Phase 2
     p2 = make_phase_col("02", "Worker", T)
     p2.layout().addWidget(make_card("p2-dequeue", "Job Dequeue", "PENDING → PROCESSING", T, bc))
     p2.layout().addWidget(make_card("p2-fail", "Path Validation — FAIL", "Rejects /share/seeding\nMarks FAILED", Re, bc))
     p2.layout().addWidget(make_card("p2-pass", "Path Validation — PASS", "Path accepted, proceed", T, bc))
     main_layout.addWidget(p2)
+    
+    # Phase 3
     p3 = make_phase_col("03", "Type", Y)
     p3.layout().addWidget(make_card("p3-router", "Media Type Router", "Analyse base path", Y, bc))
     b3 = make_branch(make_card("p3-movie", "MOVIE", "movies_root", Gr, bc), make_card("p3-tv", "TV", "tv_root", Y, bc))
     p3.layout().addWidget(b3)
     main_layout.addWidget(p3)
+    
+    # Phase 4
     p4 = make_phase_col("04", "Factory", Pu)
     p4.layout().addWidget(make_card("p4-movie", "Movie Processing", "Dir → largest file → Movie\nFile → single Movie", Gr, bc))
     p4.layout().addWidget(make_card("p4-tv", "TV Series Processing", "Dir → scan .mkv .mp4\n→ TVEpisode objects", Y, bc))
     main_layout.addWidget(p4)
+    
+    # Phase 5
     p5 = make_phase_col("05", "Check", Y)
     p5.layout().addWidget(make_card("p5-check", "MP4 Existence Check", "Does target .mp4 exist?", Y, bc))
     p5.layout().addWidget(make_card("p5-fail", "EXISTS → Fast Fail", "Skip encode · clean source\nMark COMPLETE", Re, bc))
     p5.layout().addWidget(make_card("p5-pass", "NOT EXISTS → Continue", "Proceed to pipeline", T, bc))
     main_layout.addWidget(p5)
+    
+    # Phase 6
     p6 = make_phase_col("06", "Subs", Pu)
     p6.layout().addWidget(make_card("p6-discovery", "Subtitle Discovery", "Find external OR extract embedded", Pu, bc))
     p6.layout().addWidget(make_card("p6-vobsub", "Binary VobSub", ".idx / MPEG-PS header\nKeep .sub/.idx", Pu, bc))
     p6.layout().addWidget(make_card("p6-text", "Text Subtitles", ".srt .ass MicroDVD\nForce UTF-8 · RO char rules", Pu, bc))
     main_layout.addWidget(p6)
+    
+    # Phase 7
     p7 = make_phase_col("07", "Encode", T)
     p7.layout().addWidget(make_card("p7-heuristics", "Heuristics Check", "Query DB for last successful params", T, bc))
     p7.layout().addWidget(make_card("p7-audio", "Audio Processing", "5.1/7.1 → 256k · Stereo → 192k", Pu, bc))
@@ -465,6 +448,8 @@ def _build_pipeline_ui(light=False):
     p7.layout().addWidget(make_tier_box(tier_children, light=light))
     p7.layout().addWidget(make_card("p7-outcome", "Outcome Handler", "Success → save to DB\nFailure → del temp · next tier", Y, bc))
     main_layout.addWidget(p7)
+    
+    # Phase 8
     p8 = make_phase_col("08", "Final", Gr)
     p8.layout().addWidget(make_card("p8-relocate", "File Relocation", "Move encoded .mp4 + subtitles", T, bc))
     b8 = make_branch(make_card("p8-movie", "Movies", "/archive/movies/", Gr, bc), make_card("p8-tv", "TV", "/archive/tv/", Y, bc))
@@ -473,42 +458,62 @@ def _build_pipeline_ui(light=False):
     p8.layout().addWidget(make_card("p8-complete", "✓ Job Complete", "Status: COMPLETED\nLog metrics", Gr, bc))
     main_layout.addWidget(p8)
 
+
 def _build_pipeline_arrows():
+    """Computes and draws all arrow paths between cards."""
     paths_to_draw.clear()
+    
+    # Phase 1
     V('p1-input', 'p1-queue', T)
     FWD('p1-queue', 'p2-dequeue', T)
+
+    # Phase 2
     V('p2-dequeue', 'p2-fail', Re)
     SKIP('p2-dequeue', 'p2-pass', T)
     LOOP_UP('p2-fail', 'p2-dequeue', Re)
     FWD('p2-pass', 'p3-router', T)
+
+    # Phase 3
     m3, tv3 = G('p3-movie'), G('p3-tv')
     V('p3-router', 'p3-movie', Gr, x=m3['cx'])
     V('p3-router', 'p3-tv', Y, x=tv3['cx'])
     FWD('p3-movie', 'p4-movie', Gr, -8, 0, 0.35)
     FWD('p3-tv', 'p4-tv', Y, 8, 12, 0.65)
+
+    # Phase 4
     FWD('p4-movie', 'p5-check', Gr, -8, 0, 0.32)
     FWD('p4-tv', 'p5-check', Y, 8, 0, 0.68)
+
+    # Phase 5
     V('p5-check', 'p5-fail', Re)
     SKIP('p5-check', 'p5-pass', T)
     LOOP_BACK('p5-fail', 'p2-dequeue', Re, 0)
     FWD('p5-pass', 'p6-discovery', T)
+
+    # Phase 6
     V('p6-discovery', 'p6-vobsub', Pu)
     SKIP('p6-discovery', 'p6-text', Pu)
     FWD('p6-vobsub', 'p7-heuristics', Pu, -8, 0, 0.32)
     FWD('p6-text', 'p7-heuristics', Pu, 8, 0, 0.68)
+
+    # Phase 7
     V('p7-heuristics', 'p7-audio', T)
     SKIP('p7-audio', 'p7-t1', Pu)
     V('p7-t1', 'p7-t2', Pu)
     V('p7-t2', 'p7-t3', Pu)
     SKIP('p7-t3', 'p7-outcome', Y, 16)
     FWD('p7-outcome', 'p8-relocate', T)
+
+    # Phase 8
     m8, tv8 = G('p8-movie'), G('p8-tv')
     V('p8-relocate', 'p8-movie', Gr, x=m8['cx'])
     V('p8-relocate', 'p8-tv', Y, x=tv8['cx'])
     V('p8-movie', 'p8-cleanup', Gr, x=m8['cx'])
     V('p8-tv', 'p8-cleanup', Y, x=tv8['cx'])
     V('p8-cleanup', 'p8-complete', Gr)
+    
     main_widget.update()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
