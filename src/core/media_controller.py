@@ -1,5 +1,4 @@
 import os
-import logging
 from typing import List, Any
 import qbittorrentapi
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
@@ -10,12 +9,6 @@ from src.core.tmdb_fetcher import TMDBFetcherThread
 from src.services.qbittorrent import QBittorrentClient
 from src.services.ssh_telemetry import SSHTelemetryClient
 
-# Configure Logging for conversion tracking
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("MediaController")
 
 class QueueAppenderThread(QThread):
     finished_appending = pyqtSignal()
@@ -27,17 +20,10 @@ class QueueAppenderThread(QThread):
 
     def run(self):
         try:
-            # Conversion file path
-            conv_file = r"\\192.168.20.102\Media\conversion.txt"
-            logger.info(f"[Conversion Queue] Attempting to append: {self.target_path}")
-            
-            with open(conv_file, "a", encoding="utf-8") as f:
+            with open(r"\\192.168.20.102\Media\conversion.txt", "a", encoding="utf-8") as f:
                 f.write(self.target_path + "\n")
-            
-            logger.info("[Conversion Queue] Successfully appended to conversion.txt")
             self.finished_appending.emit()
         except Exception as e:
-            logger.error(f"[Conversion Queue] Failed to write to {conv_file}: {str(e)}")
             self.error.emit(str(e))
 
 
@@ -71,8 +57,6 @@ class MediaController(QObject):
 
     def add_media_flow(self, flow_index: int, title: str, relative_path: str, torrent_bytes: bytes, image_url: str, is_restored: bool = False):
         """Bootstraps the background tasks for a newly added media flow."""
-        logger.info(f"Adding media flow [{flow_index}]: {title}")
-        
         # 1. Start TMDB resolution
         if title.startswith("tmdb:"):
             _, media_type, tmdb_id = title.split(":", 2)
@@ -107,7 +91,6 @@ class MediaController(QObject):
         if not is_restored and torrent_bytes:
             base_path = os.getenv("BASE_SCRATCH_PATH", "/data/scratch")
             final_save_path = f"{base_path}/{relative_path}".replace("\\", "/")
-            logger.info(f"Queueing torrent download to: {final_save_path}")
             
             qbit_worker = QBittorrentClient(torrent_bytes, final_save_path, self)
             self._threads.append(qbit_worker)
@@ -121,15 +104,12 @@ class MediaController(QObject):
 
     def request_conversion(self, relative_path: str):
         target_path = relative_path.replace("\\", "/") 
-        logger.info(f"Conversion request received for: {target_path}")
         queue_thread = QueueAppenderThread(target_path, self)
-        queue_thread.error.connect(lambda err: logger.error(f"Conversion Queue Error: {err}"))
         self._threads.append(queue_thread)
         queue_thread.start()
 
     def request_deletion(self, hashes: List[str], delete_files: bool):
         try:
-            logger.info(f"Requesting deletion of torrents: {hashes}")
             h = os.getenv("QBIT_HOST", "127.0.0.1")
             p = os.getenv("QBIT_PORT", "8080")
             c = qbittorrentapi.Client(
@@ -140,14 +120,13 @@ class MediaController(QObject):
             c.auth_log_in()
             c.torrents_delete(delete_files=delete_files, torrent_hashes=hashes)
         except Exception as e:
-            logger.error(f"Failed to delete torrents {hashes}: {e}")
+            print(f"Failed to delete torrents {hashes}: {e}")
 
     def start_ssh_telemetry(self, flow_index: int, target_title: str):
-        logger.info(f"Initializing SSH telemetry for: {target_title}")
         ssh_worker = SSHTelemetryClient(target_title=target_title, parent=self)
         ssh_worker.telemetry_data.connect(lambda json_payload: 
             self.ssh_telemetry_updated.emit(flow_index, json_payload)
         )
-        ssh_worker.error.connect(lambda err: logger.error(f"[Telemetry Error - {target_title}]: {err}"))
+        ssh_worker.error.connect(lambda err: print(f"[Telemetry Error - {target_title}]: {err}"))
         self._threads.append(ssh_worker)
         ssh_worker.start()
