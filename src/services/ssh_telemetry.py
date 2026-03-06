@@ -76,10 +76,15 @@ try:
                     flags[linear_path[i]] = "skip"
 
         if db_status.upper() == "COMPLETED":
-            all_cards = linear_path + ["p3-movie", "p4-movie", "p8-movie", "p3-tv", "p4-tv"]
-            for c in all_cards:
+            for c in linear_path:
                 if c not in flags:
                     flags[c] = "pass"
+            
+            if not any(k in flags for k in ["p3-movie", "p3-tv"]):
+                if "tv" in db_path.lower() or "season" in db_path.lower() or re.search(r's\\d{{2}}e\\d{{2}}', db_path.lower()):
+                    flags["p3-tv"] = "pass"; flags["p4-tv"] = "pass"; flags["p8-tv"] = "pass"
+                else:
+                    flags["p3-movie"] = "pass"; flags["p4-movie"] = "pass"; flags["p8-movie"] = "pass"
                     
         words = [w.lower() for w in re.split(r'\\W+', db_path) if len(w) > 3 and not w.isdigit()]
         ignore = ['action', 'comedy', 'movies', 'scratch', 'data', 'dvdrip', 'xvid', 'x264', '1080p', '720p', 'web', 'dl', 'aac2', 'h264', 'mkv', 'avi', 'mp4']
@@ -134,6 +139,11 @@ try:
                         ch, cm, cs = time_matches[-1]
                         curr_s = int(ch)*3600 + int(cm)*60 + int(cs)
                         ff_prog = min(int((curr_s / total_s) * 100), 100)
+                        
+                        # Instantly free UI from the heuristics hold if timestamps exist
+                        flags["p7-heuristics"] = "pass"
+                        flags["p7-audio"] = "pass"
+                        flags["p7-t2"] = "active" 
             except: pass
             
         results.append({{
@@ -155,8 +165,6 @@ print(json.dumps(results))
             b64_script = base64.b64encode(remote_script.encode('utf-8')).decode('utf-8')
             db_cmd = f"echo '{b64_script}' | base64 -d | python3"
 
-            time.sleep(4)
-
             while True:
                 stdin, stdout, stderr = client.exec_command(db_cmd)
                 raw_output = stdout.read().decode('utf-8').strip()
@@ -165,28 +173,12 @@ print(json.dumps(results))
                     match = re.search(r'\[.*\]', raw_output, re.DOTALL)
                     if match:
                         json_str = match.group()
-                        data = json.loads(json_str)
                         self.telemetry_data.emit(json_str)
                     else:
-                        data = json.loads(raw_output)
                         self.telemetry_data.emit(raw_output)
-                    
-                    if isinstance(data, list):
-                        all_finished = True
-                        for ep in data:
-                            state = ep.get("db_status", "NOT STARTED").upper()
-                            if state not in ["COMPLETED", "FAILED", "REJECTED"]:
-                                all_finished = False
-                                break
-                                
-                        if all_finished and data:
-                            # GUARDRAIL TRIGGERED: SAFELY DESTROY THREAD
-                            break
-                    else:
-                        break
+                        
                 except json.JSONDecodeError:
-                    time.sleep(5)
-                    continue
+                    pass
                     
                 time.sleep(3)
 

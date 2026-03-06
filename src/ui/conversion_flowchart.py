@@ -251,6 +251,8 @@ class ConversionFlowViewer(QWidget):
 
         self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
 
+        self._view.loadFinished.connect(self._on_load_finished)
+
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         html_path = os.path.join(base_dir, "assets", "conversion_pipeline.html")
         self._view.load(QUrl.fromLocalFile(html_path))
@@ -265,16 +267,13 @@ class ConversionFlowViewer(QWidget):
         self.fade_anim.setStartValue(0.0)
         self.fade_anim.setEndValue(1.0)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        
-        self._view.loadFinished.connect(self._on_load_finished)
 
     def _on_load_finished(self, ok):
         if ok:
             self._page_loaded = True
             self.fade_anim.start()
             if self._pending_json:
-                js = f"if (window.setPipelineState) {{ window.setPipelineState({self._pending_json}); }}"
-                self._view.page().runJavaScript(js)
+                self.update_pipeline_state(self._pending_json)
 
     def sizeHint(self):
         from PyQt6.QtCore import QSize
@@ -285,7 +284,8 @@ class ConversionFlowViewer(QWidget):
         return QSize(800, 480)
 
     def resizeEvent(self, event):
-        super().resizeEvent(event)
+        if event is not None:
+            super().resizeEvent(event)
         w = self.width()
         natural_w = 2440.0
         natural_h = 580.0 
@@ -303,7 +303,7 @@ class ConversionFlowViewer(QWidget):
             if isinstance(stages_data, str):
                 raw_flags = json.loads(stages_data) if stages_data else {}
             else:
-                raw_flags = stages_data or {}
+                raw_flags = stages_data.copy() if stages_data else {}
                 
             all_keys = [
                 "p1-input", "p1-queue", "p2-dequeue", "p2-fail", "p2-pass",
@@ -314,13 +314,12 @@ class ConversionFlowViewer(QWidget):
             ]
             flags = {k: False for k in all_keys}
             
+            # Persist original strings (like "skip" or "pass") to avoid breaking CSS
             for k, v in raw_flags.items():
                 if k in flags:
-                    if isinstance(v, str):
-                        flags[k] = v.lower() not in ('false', '0', '')
-                    else:
-                        flags[k] = bool(v)
+                    flags[k] = v
 
+            # Enforce Branch Exclusivity
             if flags.get("p3-movie") or flags.get("p4-movie") or flags.get("p8-movie"):
                 for key in ["p3-tv", "p4-tv", "p8-tv"]: flags[key] = False
             elif flags.get("p3-tv") or flags.get("p4-tv") or flags.get("p8-tv"):
@@ -333,19 +332,68 @@ class ConversionFlowViewer(QWidget):
             elif flags.get("p2-fail"): flags["p2-pass"] = False
 
             if flags.get("p8-complete"):
-                flags["p8-cleanup"] = True
-                flags["p8-relocate"] = True
+                flags["p8-cleanup"] = flags.get("p8-cleanup") or "pass"
+                flags["p8-relocate"] = flags.get("p8-relocate") or "pass"
 
-            clean_flags = {k: True for k, v in flags.items() if v}
-            clean_json = json.dumps(clean_flags)
+            clean_json = json.dumps(flags)
             
-            # Anti-flicker block COMPLETELY BYPASSED!
+            if getattr(self, '_last_json', None) == clean_json:
+                return
+            
+            self._last_json = clean_json
             self._pending_json = clean_json
             
             if not self._page_loaded:
                 return
 
-            js = f"if (window.setPipelineState) {{ window.setPipelineState({clean_json}); }}"
+            # Advanced UI Dimming Javascript Payload
+            js = f"""
+            if (window.setPipelineState) {{ 
+                window.setPipelineState({clean_json}); 
+            }}
+            
+            setTimeout(() => {{
+                const flags = {clean_json};
+                
+                Object.keys(flags).forEach(key => {{
+                    const el = document.getElementById(key);
+                    if (el) {{
+                        if (flags[key]) {{
+                            el.style.opacity = '1.0';
+                            el.style.filter = 'none';
+                        }} else {{
+                            el.style.opacity = '0.35';
+                            el.style.filter = 'grayscale(100%)';
+                            el.style.transition = 'opacity 0.5s ease';
+                        }}
+                    }}
+                }});
+                
+                document.querySelectorAll('path, line, polyline, polygon').forEach(svg => {{
+                    const id = (svg.id || '').toLowerCase();
+                    const cls = (svg.getAttribute('class') || '').toLowerCase();
+                    
+                    let linkedToFalse = false;
+                    let linkedToTrue = false;
+                    
+                    Object.keys(flags).forEach(k => {{
+                        if (id.includes(k) || cls.includes(k)) {{
+                            if (!flags[k]) linkedToFalse = true;
+                            if (flags[k]) linkedToTrue = true;
+                        }}
+                    }});
+                    
+                    if (linkedToFalse && !linkedToTrue) {{
+                        svg.style.opacity = '0.15';
+                        svg.style.stroke = '#334155';
+                        svg.style.transition = 'opacity 0.5s ease, stroke 0.5s ease';
+                    }} else if (linkedToTrue) {{
+                        svg.style.opacity = '1.0';
+                        svg.style.stroke = ''; 
+                    }}
+                }});
+            }}, 50);
+            """
             self._view.page().runJavaScript(js)
             
         except Exception:

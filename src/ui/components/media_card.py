@@ -83,7 +83,6 @@ class MediaCardWidget(QFrame):
         self.lbl_foldout_desc.setObjectName("DescText")
         self.lbl_foldout_desc.setWordWrap(True)
         
-        # ADDED SCROLLBAR: Wraps the long description securely in a 45px box!
         self.desc_scroll = QScrollArea()
         self.desc_scroll.setWidgetResizable(True)
         self.desc_scroll.setWidget(self.lbl_foldout_desc)
@@ -249,8 +248,7 @@ class MediaCardWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            if hasattr(self, 'flowchart_view') and hasattr(self.flowchart_view, '_view'):
-                self.flowchart_view._view.resizeEvent(None)
+            if hasattr(self, 'flowchart_view'):
                 self.flowchart_view.updateGeometry()
             
             target_h = self.foldout_layout.sizeHint().height()
@@ -326,14 +324,6 @@ class MediaCardWidget(QFrame):
             
         self.lbl_size_val.setText(size_str)
         self.prog_bar_dl.setValue(int(prog_val * 100))
-        
-        is_idle = human_state in ["Completed", "Paused", "Seeding", "Stopped", "Queued", "Checking", "Error", "Missing Files"]
-        if is_idle or prog_val >= 1.0 or speed_str == "0 MB/s":
-            self.lbl_speed_val.setText("-")
-            self.lbl_speed_display.setText("-")
-        else:
-            self.lbl_speed_val.setText(speed_str)
-            self.lbl_speed_display.setText(speed_str)
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data:
@@ -360,25 +350,24 @@ class MediaCardWidget(QFrame):
         from src.ui.components.progress_pill import calculate_conversion_progress
         state_text, percentage = calculate_conversion_progress(first_ep)
         
-        # 1. COMPLETION LOCK
+        # COMPLETION OVERRIDE - USING "pass" STRING INSTEAD OF TRUE
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
-            stage_flags["p8-complete"] = True
+            stage_flags["p8-complete"] = "pass"
             
             if not any(k.startswith("p3-") for k in stage_flags):
-                stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
-                stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
-                stage_flags["p3-router"] = True
+                stage_flags["p1-input"] = "pass"; stage_flags["p1-queue"] = "pass"
+                stage_flags["p2-dequeue"] = "pass"; stage_flags["p2-pass"] = "pass"
+                stage_flags["p3-router"] = "pass"
                 is_tv = bool(getattr(self, 'season', False))
-                stage_flags["p3-tv" if is_tv else "p3-movie"] = True
-                stage_flags["p4-tv" if is_tv else "p4-movie"] = True
-                stage_flags["p5-check"] = True; stage_flags["p5-pass"] = True
-                stage_flags["p8-relocate"] = True
-                stage_flags["p8-tv" if is_tv else "p8-movie"] = True
-                stage_flags["p8-cleanup"] = True
+                stage_flags["p3-tv" if is_tv else "p3-movie"] = "pass"
+                stage_flags["p4-tv" if is_tv else "p4-movie"] = "pass"
+                stage_flags["p5-check"] = "pass"; stage_flags["p5-pass"] = "pass"
+                stage_flags["p8-relocate"] = "pass"
+                stage_flags["p8-tv" if is_tv else "p8-movie"] = "pass"
+                stage_flags["p8-cleanup"] = "pass"
 
-        # 2. DETERMINE STYLING BASED ON STATE TEXT
         pill_css = "PillUnknown"
         if state_text == "Completed": pill_css = "PillSuccess"
         elif "Failed" in state_text: pill_css = "PillDanger"
@@ -396,8 +385,7 @@ class MediaCardWidget(QFrame):
         self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
         if hasattr(self, 'flowchart_view'):
-            import json
-            self.flowchart_view.update_pipeline_state(json.dumps(stage_flags))
+            self.flowchart_view.update_pipeline_state(stage_flags)
 
 
 class EpisodeRowWidget(QWidget):
@@ -505,8 +493,7 @@ class EpisodeRowWidget(QWidget):
         if is_opening:
             self.foldout.setVisible(True)
             if hasattr(self.flowchart, '_view'):
-                self.flowchart._view.resizeEvent(None)
-            self.flowchart.updateGeometry()
+                self.flowchart.updateGeometry()
             
             target_h = self.foldout.layout().sizeHint().height()
             self._foldout_anim.setStartValue(0)
@@ -545,15 +532,15 @@ class EpisodeRowWidget(QWidget):
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
-            stage_flags["p8-complete"] = True
+            stage_flags["p8-complete"] = "pass"
             
             if not any(k.startswith("p3-") for k in stage_flags):
-                stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
-                stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
-                stage_flags["p3-router"] = True; stage_flags["p3-tv"] = True
-                stage_flags["p4-tv"] = True; stage_flags["p5-check"] = True
-                stage_flags["p5-pass"] = True; stage_flags["p8-relocate"] = True
-                stage_flags["p8-tv"] = True; stage_flags["p8-cleanup"] = True
+                stage_flags["p1-input"] = "pass"; stage_flags["p1-queue"] = "pass"
+                stage_flags["p2-dequeue"] = "pass"; stage_flags["p2-pass"] = "pass"
+                stage_flags["p3-router"] = "pass"; stage_flags["p3-tv"] = "pass"
+                stage_flags["p4-tv"] = "pass"; stage_flags["p5-check"] = "pass"
+                stage_flags["p5-pass"] = "pass"; stage_flags["p8-relocate"] = "pass"
+                stage_flags["p8-tv"] = "pass"; stage_flags["p8-cleanup"] = "pass"
 
         pill_css = "PillUnknown"
         if state_text == "Completed": pill_css = "PillSuccess"
@@ -569,8 +556,7 @@ class EpisodeRowWidget(QWidget):
         self.prog_pill_conv.set_data(state_text, percentage)
         
         if hasattr(self, 'flowchart'):
-            import json
-            self.flowchart.update_pipeline_state(json.dumps(stage_flags))
+            self.flowchart.update_pipeline_state(stage_flags)
 
 
 class SeriesCardWidget(QFrame):
@@ -615,7 +601,6 @@ class SeriesCardWidget(QFrame):
         self.lbl_desc.setObjectName("DescText")
         self.lbl_desc.setWordWrap(True)
         
-        # SCROLLBAR ADDED TO SERIES AS WELL
         self.desc_scroll = QScrollArea()
         self.desc_scroll.setWidgetResizable(True)
         self.desc_scroll.setWidget(self.lbl_desc)
@@ -682,7 +667,6 @@ class SeriesCardWidget(QFrame):
         self.main_layout.addWidget(self.episodes_container)
 
     def close_flow(self):
-        # Allow main window to clean up
         self.deleteLater()
 
     def _toggle_episodes(self):
