@@ -456,6 +456,9 @@ class SecureServerWindow(QMainWindow):
         import json
         try:
             episodes_data = json.loads(json_payload)
+            # Safe Fallback: Wrap in a list if the payload is a single dictionary
+            if isinstance(episodes_data, dict):
+                episodes_data = [episodes_data]
         except Exception as e:
             print(f"Failed to parse telemetry JSON: {e}")
             episodes_data = []

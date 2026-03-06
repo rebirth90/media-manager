@@ -7,14 +7,19 @@ import re
 def calculate_conversion_progress(telemetry_data: dict) -> tuple[str, int]:
     """
     Calculates the exact state and an overall 0-100 progress percentage 
-    based on the 8 backend pipeline steps and FFmpeg telemetry.
+    based on the backend pipeline steps and FFmpeg telemetry.
     """
-    db_status = telemetry_data.get("db_status", "NOT STARTED").upper()
+    db_status = telemetry_data.get("db_status", telemetry_data.get("status", "NOT STARTED")).upper()
     
-    try:
-        flags = json.loads(telemetry_data.get("stage_results", "{}"))
-    except (json.JSONDecodeError, TypeError):
-        flags = {}
+    # Safe Dictionary/String Parsing Fallback
+    raw_flags = telemetry_data.get("stage_results", {})
+    if isinstance(raw_flags, str):
+        try:
+            flags = json.loads(raw_flags) if raw_flags else {}
+        except (json.JSONDecodeError, TypeError):
+            flags = {}
+    else:
+        flags = raw_flags or {}
         
     # Safely parse FFmpeg progress (handles empty strings and nulls safely)
     try:

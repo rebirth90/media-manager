@@ -28,14 +28,16 @@ class SSHTelemetryClient(QThread):
 
             # Python script to run remotely via base64 encoded payload
             remote_script = f"""
-import sqlite3, json, os, glob, re
+import sqlite3, json, os, glob, re, sys
 
-target_title = '''{self.target_title}'''
-remote_app_dir = '''{remote_app_dir}'''
+target_title = {repr(self.target_title)}
+remote_app_dir = {repr(remote_app_dir)}
 
 results = []
 try:
-    conn = sqlite3.connect(f'{{remote_app_dir}}/conversion_data.db')
+    # ANTI-FLICKER: Force Read-Only URI mode + 10s timeout to bypass concurrent write locks
+    db_path = f'{{remote_app_dir}}/conversion_data.db'
+    conn = sqlite3.connect(f'file:{{db_path}}?mode=ro', uri=True, timeout=10.0)
     cur = conn.cursor()
     cur.execute("SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE path LIKE ? ORDER BY path ASC", ('%' + target_title + '%',))
     rows = cur.fetchall()
@@ -145,19 +147,11 @@ try:
         }})
 
 except Exception as e:
-    pass
+    print(f"Exception during SQLite read: {{e}}", file=sys.stderr)
 
-if not results:
-    results.append({{
-        "path": target_title,
-        "db_status": "NOT STARTED",
-        "stage_results": "{{}}",
-        "sub_status": "Pending",
-        "gen_log": "",
-        "ff_tail": "",
-        "prog": 0
-    }})
-
+# CRITICAL FIX: If results are empty (due to a lock error or no DB entry yet),
+# it will print `[]` rather than fabricating a "NOT STARTED" state.
+# Your UI handles `[]` perfectly by ignoring it, stopping the flicker entirely!
 print(json.dumps(results))
 """
             import base64
@@ -186,7 +180,6 @@ print(json.dumps(results))
                         self.telemetry_data.emit(raw_output)
                     
                     if isinstance(data, list):
-                        
                         # Stop polling if all episodes are settled
                         all_finished = True
                         for ep in data:

@@ -330,10 +330,20 @@ class MediaCardWidget(QFrame):
             return
             
         first_ep = episodes_data[0]
-        db_status = first_ep.get("db_status", "NOT STARTED").upper()
+        db_status = first_ep.get("db_status", first_ep.get("status", "NOT STARTED")).upper()
         sub_status = first_ep.get("sub_status", "Pending")
         ff_out = first_ep.get("ff_tail", "")
-        stage_flags_json = first_ep.get("stage_results", "{}")
+        
+        # Safely parse JSON strings or dictionaries seamlessly
+        stage_flags_raw = first_ep.get("stage_results", {})
+        if isinstance(stage_flags_raw, str):
+            try:
+                import json
+                stage_flags = json.loads(stage_flags_raw) if stage_flags_raw else {}
+            except Exception:
+                stage_flags = {}
+        else:
+            stage_flags = stage_flags_raw.copy() if stage_flags_raw else {}
 
         self._active_qbit_state = f"DB Status: {db_status}"
         self._active_ffmpeg_log = ff_out
@@ -345,27 +355,20 @@ class MediaCardWidget(QFrame):
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
-            try:
-                import json
-                flags = json.loads(stage_flags_json) if stage_flags_json and stage_flags_json != "{}" else {}
-                flags["p8-complete"] = True
-                
-                # Only inject a fake path if the database telemetry was completely wiped/empty
-                if not any(k.startswith("p3-") for k in flags):
-                    flags["p1-input"] = True; flags["p1-queue"] = True
-                    flags["p2-dequeue"] = True; flags["p2-pass"] = True
-                    flags["p3-router"] = True
-                    is_tv = bool(getattr(self, 'season', False))
-                    flags["p3-tv" if is_tv else "p3-movie"] = True
-                    flags["p4-tv" if is_tv else "p4-movie"] = True
-                    flags["p5-check"] = True; flags["p5-pass"] = True
-                    flags["p8-relocate"] = True
-                    flags["p8-tv" if is_tv else "p8-movie"] = True
-                    flags["p8-cleanup"] = True
-                    
-                stage_flags_json = json.dumps(flags)
-            except Exception:
-                pass
+            stage_flags["p8-complete"] = True
+            
+            # Only inject a fake path if the database telemetry was completely wiped/empty
+            if not any(k.startswith("p3-") for k in stage_flags):
+                stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
+                stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
+                stage_flags["p3-router"] = True
+                is_tv = bool(getattr(self, 'season', False))
+                stage_flags["p3-tv" if is_tv else "p3-movie"] = True
+                stage_flags["p4-tv" if is_tv else "p4-movie"] = True
+                stage_flags["p5-check"] = True; stage_flags["p5-pass"] = True
+                stage_flags["p8-relocate"] = True
+                stage_flags["p8-tv" if is_tv else "p8-movie"] = True
+                stage_flags["p8-cleanup"] = True
 
         # 2. DETERMINE STYLING BASED ON STATE TEXT
         pill_css = "PillUnknown"
@@ -386,8 +389,10 @@ class MediaCardWidget(QFrame):
         self.lbl_foldout_db_status.setText(f"Conversion Status: {state_text}")
         self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
-        if hasattr(self, 'flowchart_view') and stage_flags_json:
-            self.flowchart_view.update_pipeline_state(stage_flags_json)
+        # Always feed the HTML view so default gray paths override properly
+        if hasattr(self, 'flowchart_view'):
+            import json
+            self.flowchart_view.update_pipeline_state(json.dumps(stage_flags))
 
 
 class EpisodeRowWidget(QWidget):
@@ -520,30 +525,32 @@ class EpisodeRowWidget(QWidget):
     def update_status(self, ep_data: dict):
         from src.ui.components.progress_pill import calculate_conversion_progress
         state_text, percentage = calculate_conversion_progress(ep_data)
-        db_status = ep_data.get("db_status", "NOT STARTED").upper()
-        stage_flags_json = ep_data.get("stage_results", "{}")
+        db_status = ep_data.get("db_status", ep_data.get("status", "NOT STARTED")).upper()
+        
+        # Safely parse JSON strings or dictionaries seamlessly
+        stage_flags_raw = ep_data.get("stage_results", {})
+        if isinstance(stage_flags_raw, str):
+            try:
+                import json
+                stage_flags = json.loads(stage_flags_raw) if stage_flags_raw else {}
+            except Exception:
+                stage_flags = {}
+        else:
+            stage_flags = stage_flags_raw.copy() if stage_flags_raw else {}
 
-        # Mock full path highlight for Series episodes if complete without overwriting existing details
+        # Mock full path highlight for Series episodes if complete
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
-            try:
-                import json
-                flags = json.loads(stage_flags_json) if stage_flags_json and stage_flags_json != "{}" else {}
-                flags["p8-complete"] = True
-                
-                # Only inject a fake path if the database telemetry was completely wiped/empty
-                if not any(k.startswith("p3-") for k in flags):
-                    flags["p1-input"] = True; flags["p1-queue"] = True
-                    flags["p2-dequeue"] = True; flags["p2-pass"] = True
-                    flags["p3-router"] = True; flags["p3-tv"] = True
-                    flags["p4-tv"] = True; flags["p5-check"] = True
-                    flags["p5-pass"] = True; flags["p8-relocate"] = True
-                    flags["p8-tv"] = True; flags["p8-cleanup"] = True
-                    
-                stage_flags_json = json.dumps(flags)
-            except Exception:
-                pass
+            stage_flags["p8-complete"] = True
+            
+            if not any(k.startswith("p3-") for k in stage_flags):
+                stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
+                stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
+                stage_flags["p3-router"] = True; stage_flags["p3-tv"] = True
+                stage_flags["p4-tv"] = True; stage_flags["p5-check"] = True
+                stage_flags["p5-pass"] = True; stage_flags["p8-relocate"] = True
+                stage_flags["p8-tv"] = True; stage_flags["p8-cleanup"] = True
 
         pill_css = "PillUnknown"
         if state_text == "Completed": pill_css = "PillSuccess"
@@ -557,8 +564,10 @@ class EpisodeRowWidget(QWidget):
             self.lbl_conv_status.style().polish(self.lbl_conv_status)
 
         self.prog_pill_conv.set_data(state_text, percentage)
-        if stage_flags_json:
-            self.flowchart.update_pipeline_state(stage_flags_json)
+        
+        if hasattr(self, 'flowchart'):
+            import json
+            self.flowchart.update_pipeline_state(json.dumps(stage_flags))
 
 
 class SeriesCardWidget(QFrame):

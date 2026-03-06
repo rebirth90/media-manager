@@ -280,16 +280,20 @@ class ConversionFlowViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         import os
-        from PyQt6.QtWidgets import QSizePolicy
+        from PyQt6.QtWidgets import QSizePolicy, QGraphicsOpacityEffect
         from PyQt6.QtWebEngineWidgets import QWebEngineView
         from PyQt6.QtWebEngineCore import QWebEngineSettings
-        from PyQt6.QtCore import QUrl
+        from PyQt6.QtCore import QUrl, QPropertyAnimation, QEasingCurve
         from PyQt6.QtGui import QColor
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
 
         self._view = QWebEngineView()
+        
+        # RACE CONDITION FIX: State queuing variables
+        self._page_loaded = False
+        self._pending_json = None
 
         # Transparent background matching the dark theme foldout UI
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
@@ -309,8 +313,6 @@ class ConversionFlowViewer(QWidget):
         lay.addWidget(self._view)
 
         # Apply smooth opacity fade-in
-        from PyQt6.QtWidgets import QGraphicsOpacityEffect
-        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
         self.opacity_effect = QGraphicsOpacityEffect(self._view)
         self._view.setGraphicsEffect(self.opacity_effect)
         self.opacity_effect.setOpacity(0.0)
@@ -321,7 +323,19 @@ class ConversionFlowViewer(QWidget):
         self.fade_anim.setEndValue(1.0)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
         
-        self._view.loadFinished.connect(lambda ok: self.fade_anim.start() if ok else None)
+        # Bind the safety load handler
+        self._view.loadFinished.connect(self._on_load_finished)
+
+    def _on_load_finished(self, ok):
+        """Called when HTML engine guarantees it is ready to receive JS evaluations."""
+        if ok:
+            self._page_loaded = True
+            self.fade_anim.start()
+            
+            # Execute any queued states that arrived while the page was loading
+            if self._pending_json:
+                js = f"if (window.setPipelineState) {{ window.setPipelineState({self._pending_json}); }}"
+                self._view.page().runJavaScript(js)
 
     def sizeHint(self):
         from PyQt6.QtCore import QSize
@@ -348,12 +362,17 @@ class ConversionFlowViewer(QWidget):
         self.setFixedHeight(forced_h)
         self._view.setZoomFactor(zoom)
 
-    def update_pipeline_state(self, stages_json: str) -> None:
+    def update_pipeline_state(self, stages_data) -> None:
         """Inject stage flags into the HTML pipeline after sanitizing mutually exclusive paths."""
         try:
             import json
-            raw_flags = json.loads(stages_json)
             
+            # Safe parsing
+            if isinstance(stages_data, str):
+                raw_flags = json.loads(stages_data) if stages_data else {}
+            else:
+                raw_flags = stages_data or {}
+                
             # 1. ALL KNOWN PIPELINE KEYS (Default to False so JS scrubs old highlights)
             all_keys = [
                 "p1-input", "p1-queue", 
@@ -367,10 +386,13 @@ class ConversionFlowViewer(QWidget):
             ]
             flags = {k: False for k in all_keys}
             
-            # 2. Overlay incoming true flags from the backend
+            # 2. Overlay incoming true flags from the backend (handling strings safely)
             for k, v in raw_flags.items():
                 if k in flags:
-                    flags[k] = bool(v)
+                    if isinstance(v, str) and v.lower() in ('false', '0'):
+                        flags[k] = False
+                    else:
+                        flags[k] = bool(v)
 
             # 3. Enforce Branch Exclusivity (Movies vs TV)
             if flags.get("p3-movie") or flags.get("p4-movie") or flags.get("p8-movie"):
@@ -395,7 +417,14 @@ class ConversionFlowViewer(QWidget):
             # ANTI-FLICKER: Only evaluate JS if the JSON actually changed!
             if getattr(self, '_last_json', None) == clean_json:
                 return
+            
+            # Store in cache so the loadFinished hook can grab it if triggered early
             self._last_json = clean_json
+            self._pending_json = clean_json
+
+            # Prevent firing JS into a void if the engine is still initializing
+            if not self._page_loaded:
+                return
 
             js = f"if (window.setPipelineState) {{ window.setPipelineState({clean_json}); }}"
             self._view.page().runJavaScript(js)
