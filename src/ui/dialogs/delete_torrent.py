@@ -63,35 +63,10 @@ class DeleteTorrentDialog(QDialog):
         layout.addSpacing(16)
 
         # ── Toggle Container ───────────────────────────────────────
-        self.toggle_container = QWidget()
-        self.toggle_container.setObjectName("ToggleContainer")
-        self.toggle_container.setFixedHeight(40)
-        
-        toggle_layout = QHBoxLayout(self.toggle_container)
-        toggle_layout.setContentsMargins(4, 4, 4, 4)
-        toggle_layout.setSpacing(4)
-        
-        self.btn_app_data = QPushButton("App data")
-        self.btn_app_data.setObjectName("ToggleButton")
-        self.btn_app_data.setFixedHeight(32)
-        self.btn_app_data.setCheckable(True)
-        self.btn_app_data.setChecked(True)
-        self.btn_app_data.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        self.btn_app_and_torrent = QPushButton("App and torrent data")
-        self.btn_app_and_torrent.setObjectName("ToggleButton")
-        self.btn_app_and_torrent.setFixedHeight(32)
-        self.btn_app_and_torrent.setCheckable(True)
-        self.btn_app_and_torrent.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        self.toggle_group = QButtonGroup(self)
-        self.toggle_group.setExclusive(True)
-        self.toggle_group.addButton(self.btn_app_data, 0)
-        self.toggle_group.addButton(self.btn_app_and_torrent, 1)
-        
-        toggle_layout.addWidget(self.btn_app_data)
-        toggle_layout.addWidget(self.btn_app_and_torrent)
-        layout.addWidget(self.toggle_container)
+        from src.ui.components.animated_toggle import AnimatedToggle
+        self.animated_toggle = AnimatedToggle("App data", "App and torrent data")
+        self.animated_toggle.setFixedHeight(48)
+        layout.addWidget(self.animated_toggle)
 
         layout.addStretch()
 
@@ -140,4 +115,6 @@ class DeleteTorrentDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def should_delete_files(self) -> bool:
-        return self.btn_app_and_torrent.isChecked()
+        # Index 0 is "App data"
+        # Index 1 is "App and torrent data"
+        return self.animated_toggle.index() == 1

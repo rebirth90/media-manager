@@ -11,7 +11,7 @@ def format_size(size_bytes: int) -> str:
     return f"{s} {size_name[i]}"
 
 def format_speed(speed_bytes: int) -> str:
-    """Format speed to human readable kb/s."""
+    """Format speed to human readable MB/s."""
     if speed_bytes == 0:
-        return "0 kB/s"
-    return f"{round(speed_bytes / 1024, 1)} kB/s"
+        return "0 MB/s"
+    return f"{round(speed_bytes / (1024 * 1024), 2)} MB/s"

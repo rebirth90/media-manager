@@ -123,11 +123,11 @@ try:
                     ff_lines = f.readlines()
                     ff_tail = "".join(ff_lines[-50:]).strip()
                     ff_full = "".join(ff_lines)
-                duration_match = re.search(r"Duration: (\d{{2}}):(\d{{2}}):(\d{{2}})", ff_full)
+                duration_match = re.search(r"Duration: (\\d{{2}}):(\\d{{2}}):(\\d{{2}})", ff_full)
                 if duration_match:
                     dh, dm, ds = duration_match.groups()
                     total_s = int(dh)*3600 + int(dm)*60 + int(ds)
-                    time_matches = re.findall(r"time=(\d{{2}}):(\d{{2}}):(\d{{2}})", ff_full)
+                    time_matches = re.findall(r"time=(\\d{{2}}):(\\d{{2}}):(\\d{{2}})", ff_full)
                     if time_matches and total_s > 0:
                         ch, cm, cs = time_matches[-1]
                         curr_s = int(ch)*3600 + int(cm)*60 + int(cs)
@@ -161,20 +161,53 @@ if not results:
 print(json.dumps(results))
 """
             import base64
+            import time
             b64_script = base64.b64encode(remote_script.encode('utf-8')).decode('utf-8')
             db_cmd = f"echo '{b64_script}' | base64 -d | python3"
 
-            stdin, stdout, stderr = client.exec_command(db_cmd)
-            raw_output = stdout.read().decode('utf-8').strip()
-            
-            try:
-                data = json.loads(raw_output)
-                if isinstance(data, list):
-                    self.telemetry_data.emit(raw_output)
-                else:
-                    self.error.emit(f"Expected JSON array. Got: {{raw_output}}")
-            except json.JSONDecodeError:
-                self.error.emit(f"JSON Parse Error. Raw: {{raw_output}}")
+            while True:
+                stdin, stdout, stderr = client.exec_command(db_cmd)
+                raw_output = stdout.read().decode('utf-8').strip()
+                err_output = stderr.read().decode('utf-8').strip()
+                
+                if err_output:
+                    print(f"[{self.target_title} Telemetry STDERR]: {err_output}")
+                
+                try:
+                    # Find the JSON array in the output (in case of server banners/warnings)
+                    match = re.search(r'\[.*\]', raw_output, re.DOTALL)
+                    if match:
+                        json_str = match.group()
+                        data = json.loads(json_str)
+                        self.telemetry_data.emit(json_str)
+                    else:
+                        # Fallback for empty/malformed
+                        data = json.loads(raw_output)
+                        self.telemetry_data.emit(raw_output)
+                    
+                    if isinstance(data, list):
+                        
+                        # Stop polling if all episodes are settled
+                        all_finished = True
+                        for ep in data:
+                            state = ep.get("db_status", "NOT STARTED").upper()
+                            if state not in ["COMPLETED", "FAILED", "REJECTED"]:
+                                all_finished = False
+                                break
+                                
+                        if all_finished and data:
+                            break
+                    else:
+                        self.error.emit(f"Expected JSON array. Got: {raw_output}")
+                        break
+                except json.JSONDecodeError:
+                    print(f"[SSH Telemetry - {self.target_title}] JSON Parse Error. Raw: {raw_output}")
+                    self.error.emit(f"JSON Parse Error for {self.target_title}")
+                    # Continue instead of break to allow temporary server hiccups
+                    time.sleep(5)
+                    continue
+                    
+                time.sleep(3)
 
             client.close()
         except Exception as e:

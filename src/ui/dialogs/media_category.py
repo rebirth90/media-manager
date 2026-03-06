@@ -60,41 +60,16 @@ class MediaCategoryDialog(QDialog):
         layout.addLayout(title_row)
 
         # ── Toggle Container ───────────────────────────────────────
-        self.toggle_container = QWidget()
-        self.toggle_container.setObjectName("ToggleContainer")
-        self.toggle_container.setFixedHeight(40)
-        
-        toggle_layout = QHBoxLayout(self.toggle_container)
-        toggle_layout.setContentsMargins(4, 4, 4, 4)
-        toggle_layout.setSpacing(4)
-        
-        self.btn_movie = QPushButton("Movie")
-        self.btn_movie.setObjectName("ToggleButton")
-        self.btn_movie.setFixedHeight(32)
-        self.btn_movie.setCheckable(True)
-        self.btn_movie.setChecked(True)
-        self.btn_movie.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        self.btn_tv = QPushButton("TV-Series")
-        self.btn_tv.setObjectName("ToggleButton")
-        self.btn_tv.setFixedHeight(32)
-        self.btn_tv.setCheckable(True)
-        self.btn_tv.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        self.toggle_group = QButtonGroup(self)
-        self.toggle_group.setExclusive(True)
-        self.toggle_group.addButton(self.btn_movie, 0)
-        self.toggle_group.addButton(self.btn_tv, 1)
-        self.toggle_group.buttonClicked.connect(self._select_type)
-        
-        toggle_layout.addWidget(self.btn_movie)
-        toggle_layout.addWidget(self.btn_tv)
-        layout.addWidget(self.toggle_container)
+        from src.ui.components.animated_toggle import AnimatedToggle
+        self.animated_toggle = AnimatedToggle("Movie", "TV-Series")
+        self.animated_toggle.setFixedHeight(48)
+        self.animated_toggle.toggled.connect(self._select_type)
+        layout.addWidget(self.animated_toggle)
 
         # ── Genre dropdown (movie mode) ────────────────────────────
         self.genre_container = QWidget()
         genre_row = QHBoxLayout(self.genre_container)
-        genre_row.setContentsMargins(0, 0, 0, 0)
+        genre_row.setContentsMargins(4, 4, 4, 4)
         genre_row.setSpacing(14)
 
         lbl_genre = QLabel("Genre")
@@ -113,15 +88,15 @@ class MediaCategoryDialog(QDialog):
         self.genre_dropdown.setStyleSheet(f"""
             QComboBox {{
                 background-color: transparent;
-                border: 1px solid rgba(255, 255, 255, 0.05);
+                border: 2px solid rgba(255, 255, 255, 0.05);
                 border-radius: 12px;
-                padding-left: 14px;
-                padding-right: 36px;
+                padding-left: 13px;
+                padding-right: 35px;
                 font-size: 10.5pt;
                 color: #8B949E;
             }}
             QComboBox:focus {{
-                border-color: #3b82f6;
+                border: 2px solid #3b82f6;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
@@ -155,7 +130,7 @@ class MediaCategoryDialog(QDialog):
         # ── Series name input (TV mode, hidden by default) ─────────
         self.series_container = QWidget()
         series_row = QHBoxLayout(self.series_container)
-        series_row.setContentsMargins(0, 0, 0, 0)
+        series_row.setContentsMargins(4, 4, 4, 4)
         series_row.setSpacing(14)
 
         lbl_series = QLabel("Series")
@@ -168,21 +143,40 @@ class MediaCategoryDialog(QDialog):
         self.series_input.setStyleSheet("""
             QLineEdit {
                 background-color: transparent;
-                border: 1px solid rgba(255, 255, 255, 0.05);
+                border: 2px solid rgba(255, 255, 255, 0.05);
                 border-radius: 12px;
-                padding-left: 14px;
+                padding-left: 13px;
                 font-size: 10.5pt;
                 color: #F8FAFC;
             }
             QLineEdit:focus {
-                border-color: #3b82f6;
+                border: 2px solid #3b82f6;
             }
         """)
 
         series_row.addWidget(lbl_series)
         series_row.addWidget(self.series_input, 1)
-        self.series_container.hide()
+        self.series_container.setMaximumHeight(0)
+        self.series_container.setVisible(True)
+        self.series_container.setStyleSheet("border: none;")
         layout.addWidget(self.series_container)
+        
+        self.genre_container.setVisible(True)
+        self.genre_container.setStyleSheet("border: none;")
+        
+        # ── Animations Setup ──
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
+        self._anim_group = QParallelAnimationGroup(self)
+        self._genre_anim = QPropertyAnimation(self.genre_container, b"maximumHeight", self)
+        self._genre_anim.setDuration(220)
+        self._genre_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
+        self._series_anim = QPropertyAnimation(self.series_container, b"maximumHeight", self)
+        self._series_anim.setDuration(220)
+        self._series_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
+        self._anim_group.addAnimation(self._genre_anim)
+        self._anim_group.addAnimation(self._series_anim)
 
         layout.addStretch()
 
@@ -232,11 +226,42 @@ class MediaCategoryDialog(QDialog):
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
 
-    def _select_type(self, button) -> None:
-        is_movie = (button == self.btn_movie)
-        self._is_movie = is_movie
-        self.genre_container.setVisible(is_movie)
-        self.series_container.setVisible(not is_movie)
+    def _select_type(self, index: int) -> None:
+        self._is_movie = (index == 0)
+        
+        self._anim_group.stop()
+
+        # Unlock and measure dynamically
+        self.genre_container.setMaximumHeight(16777215)
+        g_target = self.genre_container.sizeHint().height()
+        
+        self.series_container.setMaximumHeight(16777215)
+        s_target = self.series_container.sizeHint().height()
+
+        if self._is_movie:
+            self._genre_anim.setStartValue(self.genre_container.height())
+            self._genre_anim.setEndValue(max(g_target, 44))
+            
+            self._series_anim.setStartValue(self.series_container.height())
+            self._series_anim.setEndValue(0)
+        else:
+            self._genre_anim.setStartValue(self.genre_container.height())
+            self._genre_anim.setEndValue(0)
+            
+            self._series_anim.setStartValue(self.series_container.height())
+            self._series_anim.setEndValue(max(s_target, 44))
+            
+        def reset_max_heights():
+            if self._is_movie:
+                self.genre_container.setMaximumHeight(16777215)
+            else:
+                self.series_container.setMaximumHeight(16777215)
+
+        try: self._anim_group.finished.disconnect()
+        except TypeError: pass
+        self._anim_group.finished.connect(reset_max_heights)
+
+        self._anim_group.start()
 
     def get_relative_path(self) -> str:
         if self._is_movie:

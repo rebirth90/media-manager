@@ -336,6 +336,29 @@
       opacity: 0.35;
       transition: opacity 0.4s ease;
     }
+
+    @keyframes spin {
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes march {
+      to {
+        stroke-dashoffset: -20;
+      }
+    }
+
+    .hg-icon {
+      animation: spin 2.5s linear infinite;
+      display: inline-block;
+      margin-left: 6px;
+      vertical-align: middle;
+      width: 14px;
+      height: 14px;
+      color: var(--text);
+      opacity: 0.8;
+    }
   </style>
 </head>
 
@@ -623,14 +646,40 @@
     window.setPipelineState = function (stages) {
       _pipelineState = stages || {};
 
+      let latestId = null;
+      let latestNum = -1;
+
       Object.entries(_pipelineState).forEach(([id, state]) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.classList.remove('stage-success', 'stage-fail', 'stage-skip');
-        if (state === 'pass') el.classList.add('stage-success');
+        if (state === 'pass') {
+          el.classList.add('stage-success');
+          let m = id.match(/p(\d+)/);
+          if (m) {
+            let num = parseInt(m[1]);
+            if (num >= latestNum) {
+              latestNum = num;
+              latestId = id;
+            }
+          }
+        }
         else if (state === 'fail') el.classList.add('stage-fail');
         else if (state === 'skip') el.classList.add('stage-skip');
       });
+
+      document.querySelectorAll('.hg-icon').forEach(e => e.remove());
+
+      const hasFail = Object.values(_pipelineState).includes('fail');
+      if (latestId && latestId !== 'p8-complete' && !hasFail) {
+        const targetEl = document.getElementById(latestId);
+        if (targetEl) {
+          const titleEl = targetEl.querySelector('.sc-title');
+          if (titleEl) {
+            titleEl.insertAdjacentHTML('beforeend', '<svg class="hg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M5 2h14"/><path d="M5 22h14"/><path d="M5 6l7 6 7-6"/><path d="M5 18l7-6 7 6"/></svg>');
+          }
+        }
+      }
 
       _activeArrows.clear();
       _failedArrows.clear();
@@ -688,7 +737,8 @@
       p.setAttribute('stroke-linecap', 'square');
       p.setAttribute('stroke-linejoin', 'miter');
       p.setAttribute('opacity', (active || failed) ? '1' : '0.75');
-      if (dashed) p.setAttribute('stroke-dasharray', '5 4');
+      if (dashed || active) p.setAttribute('stroke-dasharray', active ? '8 4' : '5 4');
+      if (active) p.style.animation = 'march 0.7s linear infinite';
       if (marker) p.setAttribute('marker-end', active ? `url(#m-green)` : (failed ? `url(#m-red)` : `url(#${marker})`));
       SVG.appendChild(p);
     }

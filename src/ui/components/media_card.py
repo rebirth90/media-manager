@@ -16,12 +16,12 @@ class MediaCardWidget(QFrame):
     delete_confirmed = pyqtSignal(list, bool, object)  # [hash], delete_files, flow_reference
     send_to_conversion_requested = pyqtSignal(str, object)
 
-    def __init__(self, index: int, relative_path: str, title: str, season: str = "", hash_val: str = "", parent=None):
+    def __init__(self, index: int, relative_path: str, title: str, season: str = "", hash_val: str = "", db_id: int = -1, parent=None):
         super().__init__(parent)
         self.flow_index = index
         self.relative_path = relative_path
         self._current_hash = hash_val
-        self.db_id = None
+        self.db_id = db_id
         
         base_title = title if title else "Unknown Media"
         if season:
@@ -136,26 +136,29 @@ class MediaCardWidget(QFrame):
         pr_v.addWidget(self.prog_bar_dl)
         status_layout.addWidget(pr_container)
 
-        sp_container, sp_v = create_col("DL Speed", 80)
-        self.lbl_speed_display = QLabel("0 kB/s")
+        sp_container, sp_v = create_col("Torrent DL speed", 110)
+        self.lbl_speed_display = QLabel("-")
         self.lbl_speed_display.setFixedHeight(24)
         self.lbl_speed_display.setObjectName("SizeText")
         self.lbl_speed_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sp_v.addWidget(self.lbl_speed_display)
         status_layout.addWidget(sp_container)
         
-        cs_container, cs_v = create_col("Conversion Status", 130)
-        self.lbl_conv_state_val = QLabel("NOT STARTED")
-        self.lbl_conv_state_val.setFixedHeight(24)
-        self.lbl_conv_state_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_conv_state_val.setProperty("class", "PillUnknown")
-        self.prog_bar_conv = QProgressBar()
-        self.prog_bar_conv.setRange(0, 100)
-        self.prog_bar_conv.setFixedSize(80, 24)
-        self.prog_bar_conv.hide()
-        cs_v.addWidget(self.lbl_conv_state_val)
-        cs_v.addWidget(self.prog_bar_conv)
+        cs_container, cs_v = create_col("Conversion Status", 120)
+        self.lbl_conv_status = QLabel("Not Started")
+        self.lbl_conv_status.setFixedHeight(24)
+        self.lbl_conv_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_conv_status.setProperty("class", "PillUnknown")
+        cs_v.addWidget(self.lbl_conv_status)
         status_layout.addWidget(cs_container)
+
+        cp_container, cp_v = create_col("Conversion Progress", 140)
+        self.lbl_conv_progress = QLabel("0%")
+        self.lbl_conv_progress.setFixedHeight(24)
+        self.lbl_conv_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_conv_progress.setObjectName("SizeText")
+        cp_v.addWidget(self.lbl_conv_progress)
+        status_layout.addWidget(cp_container)
 
         self.top_row_layout.addLayout(status_layout)
         
@@ -202,7 +205,7 @@ class MediaCardWidget(QFrame):
         self.foldout_container.setVisible(False)
         # style assigned via QSS objectName
         self.foldout_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
-        self.foldout_container.setMinimumHeight(350) 
+        self.foldout_container.setMaximumHeight(0) 
         self.foldout_layout = QVBoxLayout(self.foldout_container)
         self.foldout_layout.setContentsMargins(10, 0, 10, 10)
         self.foldout_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -227,15 +230,42 @@ class MediaCardWidget(QFrame):
         return super().eventFilter(obj, event)
 
     def _toggle_foldout(self) -> None:
-        is_visible = self.foldout_container.isVisible()
-        self.foldout_container.setVisible(not is_visible)
-        
-        # Trigger explicit resize / update cycle on HTML logic if expanded
-        if not is_visible and hasattr(self, 'flowchart_view'):
-            if hasattr(self.flowchart_view, '_view'):
-                self.flowchart_view._view.resizeEvent(None)  # or simple trigger
-            self.flowchart_view.updateGeometry()
-            self.foldout_container.adjustSize()
+        is_opening = self.foldout_container.maximumHeight() == 0
+
+        if not hasattr(self, '_foldout_anim'):
+            from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+            self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
+            self._foldout_anim.setDuration(220)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+        # Clear old finished connections safely
+        try: self._foldout_anim.finished.disconnect()
+        except TypeError: pass
+
+        if is_opening:
+            self.foldout_container.setVisible(True)
+            if hasattr(self, 'flowchart_view') and hasattr(self.flowchart_view, '_view'):
+                self.flowchart_view._view.resizeEvent(None)
+                self.flowchart_view.updateGeometry()
+            
+            target_h = self.foldout_layout.sizeHint().height()
+            self._foldout_anim.setStartValue(0)
+            self._foldout_anim.setEndValue(max(target_h, 450))
+            
+            def on_open_finished():
+                if self.foldout_container.maximumHeight() > 0:
+                    self.foldout_container.setMaximumHeight(16777215)
+            self._foldout_anim.finished.connect(on_open_finished)
+            self._foldout_anim.start()
+        else:
+            def on_close_finished():
+                if self.foldout_container.maximumHeight() == 0:
+                    self.foldout_container.setVisible(False)
+            self._foldout_anim.finished.connect(on_close_finished)
+            
+            self._foldout_anim.setStartValue(self.foldout_container.height())
+            self._foldout_anim.setEndValue(0)
+            self._foldout_anim.start()
     def _prompt_delete(self) -> None:
         # We handle dialog inside UI, but logic deletion is emitted to controller
         if not self._current_hash:
@@ -286,8 +316,15 @@ class MediaCardWidget(QFrame):
         self.prog_bar_dl.style().polish(self.prog_bar_dl)
         self.lbl_size_val.setText(size_str)
         self.prog_bar_dl.setValue(int(prog_val * 100))
-        self.lbl_speed_val.setText(speed_str)
-        self.lbl_speed_display.setText(speed_str)
+        
+        # Idle speed logic
+        is_idle = human_state in ["Completed", "Paused", "Seeding", "Stopped", "Queued", "Checking", "Error", "Missing Files"]
+        if is_idle or prog_val >= 1.0 or speed_str == "0 MB/s":
+            self.lbl_speed_val.setText("-")
+            self.lbl_speed_display.setText("-")
+        else:
+            self.lbl_speed_val.setText(speed_str)
+            self.lbl_speed_display.setText(speed_str)
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data:
@@ -309,10 +346,17 @@ class MediaCardWidget(QFrame):
         self._active_qbit_state = f"DB Status: {db_status}"
         self._active_ffmpeg_log = ff_out
         
-        self.lbl_conv_state_val.setText(db_status)
-        self.lbl_conv_state_val.setProperty("class", pill_css)
-        self.lbl_conv_state_val.style().unpolish(self.lbl_conv_state_val)
-        self.lbl_conv_state_val.style().polish(self.lbl_conv_state_val)
+        # Update Conversion Status label (plain text DB state)
+        self.lbl_conv_status.setText(db_status)
+        self.lbl_conv_status.setProperty("class", pill_css)
+        self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
+        self.lbl_conv_status.style().polish(self.lbl_conv_status)
+        
+        # Update Conversion Progress label (percentage only)
+        from src.ui.components.progress_pill import calculate_conversion_progress
+        state_text, percentage = calculate_conversion_progress(first_ep)
+        self.lbl_conv_progress.setText(f"{percentage}%")
+        
         self.lbl_foldout_db_status.setText(f"Conversion Status: {db_status}")
         self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
@@ -360,12 +404,13 @@ class EpisodeRowWidget(QWidget):
         status_header = QLabel("Conversion Status")
         status_header.setObjectName("PillHeader")
         status_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status = QLabel("NOT STARTED")
-        self.lbl_status.setFixedHeight(24)
-        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setProperty("class", "PillUnknown")
+        
+        self.lbl_conv_progress = QLabel("0%")
+        self.lbl_conv_progress.setFixedHeight(24)
+        self.lbl_conv_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_conv_progress.setObjectName("SizeText")
         status_v.addWidget(status_header)
-        status_v.addWidget(self.lbl_status)
+        status_v.addWidget(self.lbl_conv_progress)
         
         top_layout.addLayout(status_v)
         
@@ -385,7 +430,7 @@ class EpisodeRowWidget(QWidget):
         # --- Flowchart Foldout ---
         self.foldout = QWidget()
         self.foldout.setVisible(False)
-        self.foldout.setMinimumHeight(300)
+        self.foldout.setMaximumHeight(0)
         foldout_layout = QVBoxLayout(self.foldout)
         self.flowchart = ConversionFlowViewer()
         foldout_layout.addWidget(self.flowchart)
@@ -399,23 +444,49 @@ class EpisodeRowWidget(QWidget):
         return super().eventFilter(obj, event)
 
     def _toggle_foldout(self):
-        is_vis = self.foldout.isVisible()
-        self.foldout.setVisible(not is_vis)
-        if not is_vis:
+        is_opening = self.foldout.maximumHeight() == 0
+
+        if not hasattr(self, '_foldout_anim'):
+            from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+            self._foldout_anim = QPropertyAnimation(self.foldout, b"maximumHeight", self)
+            self._foldout_anim.setDuration(220)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+        try: self._foldout_anim.finished.disconnect()
+        except TypeError: pass
+
+        if is_opening:
+            self.foldout.setVisible(True)
             if hasattr(self.flowchart, '_view'):
                 self.flowchart._view.resizeEvent(None)
             self.flowchart.updateGeometry()
+            
+            target_h = self.foldout.layout().sizeHint().height()
+            self._foldout_anim.setStartValue(0)
+            self._foldout_anim.setEndValue(max(target_h, 450))
+            
+            def on_open_finished():
+                if self.foldout.maximumHeight() > 0:
+                    self.foldout.setMaximumHeight(16777215)
+            self._foldout_anim.finished.connect(on_open_finished)
+            self._foldout_anim.start()
+        else:
+            def on_close_finished():
+                if self.foldout.maximumHeight() == 0:
+                    self.foldout.setVisible(False)
+            self._foldout_anim.finished.connect(on_close_finished)
+            
+            self._foldout_anim.setStartValue(self.foldout.height())
+            self._foldout_anim.setEndValue(0)
+            self._foldout_anim.start()
 
-    def update_status(self, db_status, stage_flags_json):
-        self.lbl_status.setText(db_status)
-        pill_css = "PillUnknown"
-        if db_status == "COMPLETED": pill_css = "PillSuccess"
-        elif db_status == "FAILED": pill_css = "PillDanger"
-        elif db_status not in ["NOT STARTED", "INITIALIZING"]: pill_css = "PillActive"
+    def update_status(self, ep_data: dict):
+        from src.ui.components.progress_pill import calculate_conversion_progress
         
-        self.lbl_status.setProperty("class", pill_css)
-        self.lbl_status.style().unpolish(self.lbl_status)
-        self.lbl_status.style().polish(self.lbl_status)
+        state_text, percentage = calculate_conversion_progress(ep_data)
+        self.lbl_conv_progress.setText(f"{percentage}%")
+        
+        stage_flags_json = ep_data.get("stage_results", "{}")
         
         if stage_flags_json:
             self.flowchart.update_pipeline_state(stage_flags_json)
@@ -423,9 +494,10 @@ class EpisodeRowWidget(QWidget):
 class SeriesCardWidget(QFrame):
     delete_confirmed = pyqtSignal(list, bool, object)
 
-    def __init__(self, index: int, relative_path: str, title: str, season: str, hash_val: str = "", parent=None):
+    def __init__(self, index: int, relative_path: str, title: str, season: str, hash_val: str = "", db_id: int = -1, parent=None):
         super().__init__(parent)
         self.flow_index = index
+        self.db_id = db_id
         self.relative_path = relative_path
         self._current_hash = hash_val
         self.season = season
@@ -467,6 +539,28 @@ class SeriesCardWidget(QFrame):
         info_v.addWidget(self.lbl_desc)
         top_layout.addLayout(info_v, 1)
 
+        # Status Container
+        from src.ui.components.progress_pill import ProgressPillWidget
+        
+        def create_col(title_str, width=None):
+            w = QWidget()
+            if width: w.setFixedWidth(width)
+            lay = QVBoxLayout(w)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(4)
+            t_lbl = QLabel(title_str)
+            t_lbl.setObjectName("SubText")
+            lay.addWidget(t_lbl)
+            return w, lay
+
+        cs_container, cs_v = create_col("Season Conversion Status", 180)
+        self.lbl_conv_progress = QLabel("0%")
+        self.lbl_conv_progress.setFixedHeight(24)
+        self.lbl_conv_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_conv_progress.setObjectName("SizeText")
+        cs_v.addWidget(self.lbl_conv_progress)
+        top_layout.addWidget(cs_container)
+
         # Collapse Button
         self.btn_collapse = QPushButton("Collapse episodes")
         self.btn_collapse.setObjectName("CollapseButton")
@@ -493,9 +587,40 @@ class SeriesCardWidget(QFrame):
         self.deleteLater()
 
     def _toggle_episodes(self):
-        is_vis = self.episodes_container.isVisible()
-        self.episodes_container.setVisible(not is_vis)
-        self.btn_collapse.setText("Expand episodes" if is_vis else "Collapse episodes")
+        is_opening = self.episodes_container.maximumHeight() == 0
+
+        if not hasattr(self, '_episodes_anim'):
+            from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+            self._episodes_anim = QPropertyAnimation(self.episodes_container, b"maximumHeight", self)
+            self._episodes_anim.setDuration(220)
+            self._episodes_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+        try: self._episodes_anim.finished.disconnect()
+        except TypeError: pass
+
+        if is_opening:
+            self.btn_collapse.setText("Collapse episodes")
+            self.episodes_container.setVisible(True)
+            
+            target_h = self.episodes_layout.sizeHint().height()
+            self._episodes_anim.setStartValue(0)
+            self._episodes_anim.setEndValue(max(target_h, 200))
+            
+            def on_open_finished():
+                if self.episodes_container.maximumHeight() > 0:
+                    self.episodes_container.setMaximumHeight(16777215)
+            self._episodes_anim.finished.connect(on_open_finished)
+            self._episodes_anim.start()
+        else:
+            self.btn_collapse.setText("Expand episodes")
+            def on_close_finished():
+                if self.episodes_container.maximumHeight() == 0:
+                    self.episodes_container.setVisible(False)
+            self._episodes_anim.finished.connect(on_close_finished)
+            
+            self._episodes_anim.setStartValue(self.episodes_container.height())
+            self._episodes_anim.setEndValue(0)
+            self._episodes_anim.start()
 
     def update_metadata(self, title, desc, genre, rating):
         self.title = title
@@ -529,6 +654,9 @@ class SeriesCardWidget(QFrame):
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
         import os, re
+        status_text, prog_val = calculate_season_progress(episodes_data)
+        # Update percentual progress only
+        self.lbl_conv_progress.setText(f"{prog_val}%")
         
         # Sort by episode path to ensure E1 is before E2
         for ep_data in sorted(episodes_data, key=lambda x: x.get("path", "")):
@@ -546,4 +674,4 @@ class SeriesCardWidget(QFrame):
                 self.episodes_layout.addWidget(row)
                 
             row = self.episodes_map[path]
-            row.update_status(ep_data.get("db_status", "NOT STARTED"), ep_data.get("stage_results", "{}"))
+            row.update_status(ep_data)

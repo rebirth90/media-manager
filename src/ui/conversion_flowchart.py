@@ -306,8 +306,22 @@ class ConversionFlowViewer(QWidget):
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         html_path = os.path.join(base_dir, "assets", "conversion_pipeline.html")
         self._view.load(QUrl.fromLocalFile(html_path))
-
         lay.addWidget(self._view)
+
+        # Apply smooth opacity fade-in
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+        self.opacity_effect = QGraphicsOpacityEffect(self._view)
+        self._view.setGraphicsEffect(self.opacity_effect)
+        self.opacity_effect.setOpacity(0.0)
+        
+        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity", self)
+        self.fade_anim.setDuration(300)
+        self.fade_anim.setStartValue(0.0)
+        self.fade_anim.setEndValue(1.0)
+        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
+        self._view.loadFinished.connect(lambda ok: self.fade_anim.start() if ok else None)
 
     def sizeHint(self):
         from PyQt6.QtCore import QSize

@@ -71,10 +71,21 @@ class MediaController(QObject):
                     self.fetch_image(idx, img)
             
             fetcher.details_resolved.connect(handle_details)
+            
+            # Delay SSH telemetry until the human title is available
+            if not is_restored:
+                fetcher.title_resolved.connect(
+                    lambda resolved_title, idx=flow_index: self.start_ssh_telemetry(idx, resolved_title)
+                )
+            
             self._threads.append(fetcher)
             fetcher.start()
-        elif image_url:
-            self.fetch_image(flow_index, image_url)
+        else:
+            if image_url:
+                self.fetch_image(flow_index, image_url)
+            # For plain-string titles, start SSH telemetry immediately
+            if not is_restored:
+                self.start_ssh_telemetry(flow_index, title)
             
         # 2. Add to qBittorrent if it's new
         if not is_restored and torrent_bytes:
@@ -116,5 +127,6 @@ class MediaController(QObject):
         ssh_worker.telemetry_data.connect(lambda json_payload: 
             self.ssh_telemetry_updated.emit(flow_index, json_payload)
         )
+        ssh_worker.error.connect(lambda err: print(f"[Telemetry Error - {target_title}]: {err}"))
         self._threads.append(ssh_worker)
         ssh_worker.start()

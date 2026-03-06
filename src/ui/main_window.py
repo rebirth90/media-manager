@@ -64,36 +64,13 @@ class SecureServerWindow(QMainWindow):
         self.btn_add_torrent.clicked.connect(self._spawn_browser_modal_with_blur)
         
         # Movies / TV Series Toggle
-        self.toggle_container = QWidget()
-        self.toggle_container.setObjectName("ToggleContainer")
-        self.toggle_container.setFixedHeight(48)
-        toggle_layout = QHBoxLayout(self.toggle_container)
-        toggle_layout.setContentsMargins(4, 4, 4, 4)
-        toggle_layout.setSpacing(4)
-        
-        self.btn_movies = QPushButton("Movies")
-        self.btn_movies.setCheckable(True)
-        self.btn_movies.setChecked(True)
-        self.btn_movies.setObjectName("ToggleButton")
-        self.btn_movies.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_movies.setFixedSize(100, 40)
-        
-        self.btn_tv = QPushButton("TV Series")
-        self.btn_tv.setCheckable(True)
-        self.btn_tv.setObjectName("ToggleButton")
-        self.btn_tv.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tv.setFixedSize(100, 40)
-        
-        self.toggle_group = QButtonGroup(self)
-        self.toggle_group.setExclusive(True)
-        self.toggle_group.addButton(self.btn_movies, 0)
-        self.toggle_group.addButton(self.btn_tv, 1)
-        
-        toggle_layout.addWidget(self.btn_movies)
-        toggle_layout.addWidget(self.btn_tv)
+        from src.ui.components.animated_toggle import AnimatedToggle
+        self.animated_toggle = AnimatedToggle("Movies", "TV Series")
+        self.animated_toggle.setFixedHeight(48)
+        self.animated_toggle.setMinimumWidth(216)
         
         self.current_media_filter = "Movies"
-        self.toggle_group.buttonClicked.connect(self._on_media_toggle_changed)
+        self.animated_toggle.toggled.connect(self._on_media_toggle_changed)
         
         # Refined functional search bar matching mockup design
         self.search_bar = SearchBarWidget(self)
@@ -135,7 +112,7 @@ class SecureServerWindow(QMainWindow):
         window_controls.addWidget(self.btn_close)
 
         nav_layout.addWidget(self.btn_add_torrent)
-        nav_layout.addWidget(self.toggle_container)
+        nav_layout.addWidget(self.animated_toggle)
         nav_layout.addStretch(1)
         nav_layout.addWidget(self.search_bar)
         nav_layout.addStretch(1)           # Equal stretch after search → centers the bar
@@ -192,6 +169,7 @@ class SecureServerWindow(QMainWindow):
                         relative_path=row["relative_path"],
                         title=row["title"],
                         season=season_val,
+                        db_id=row["id"],
                         parent=self.scroll_content
                     )
                 else:
@@ -200,6 +178,7 @@ class SecureServerWindow(QMainWindow):
                         relative_path=row["relative_path"],
                         title=row["title"],
                         season="",
+                        db_id=row["id"],
                         parent=self.scroll_content
                     )
                 
@@ -208,6 +187,47 @@ class SecureServerWindow(QMainWindow):
                 
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
+                
+                # Inject cached data if available
+                import json
+                
+                # Start SSH telemetry — defer if title is still a raw TMDB ID
+                raw_title = row["title"]
+                if raw_title.startswith("tmdb:"):
+                    # Re-use the TMDB fetcher to get the resolved title, then start telemetry
+                    try:
+                        _, media_type, tmdb_id = raw_title.split(":", 2)
+                        from src.core.tmdb_fetcher import TMDBFetcherThread
+                        restore_fetcher = TMDBFetcherThread(tmdb_id, media_type, self)
+                        restore_fetcher.title_resolved.connect(
+                            lambda resolved, idx=index: self.media_controller.start_ssh_telemetry(idx, resolved)
+                        )
+                        restore_fetcher.start()
+                    except Exception:
+                        pass  # Skip telemetry for malformed tmdb: titles
+                else:
+                    self.media_controller.start_ssh_telemetry(index, raw_title)
+                        
+                # Check torrent cache
+                tor_cache = self.db_manager.get_torrent_cache_by_path(row["relative_path"].replace("\\", "/"))
+                if tor_cache:
+                    try:
+                        matched_t = json.loads(tor_cache)
+                        flow._current_hash = matched_t.get('hash', '')
+                        flow._current_torrent_name = matched_t.get('name', '')
+                        size = matched_t.get('size', 0)
+                        active_state_str = f"State: Completed | Progress: 100% | Size: {format_size(size)}"
+                        flow.update_torrent_ui(
+                            human_state="Completed",
+                            pill_class="PillSuccess",
+                            pb_style="PbSuccess",
+                            prog_val=1.0,
+                            size_str=format_size(size),
+                            speed_str="-",
+                            active_state_str=active_state_str
+                        )
+                    except json.JSONDecodeError:
+                        pass
                 
                 self.media_controller.add_media_flow(
                     flow_index=index,
@@ -236,6 +256,7 @@ class SecureServerWindow(QMainWindow):
         finally:
             self.canvas_container.setGraphicsEffect(None)
             self._modal_open = False
+            self._update_maximize_icon()
 
     def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str, season: str = "") -> None:
         try:
@@ -266,6 +287,7 @@ class SecureServerWindow(QMainWindow):
                         relative_path=relative_path,
                         title=title,
                         season=season,
+                        db_id=db_id,
                         parent=self.scroll_content
                     )
                 else:
@@ -274,6 +296,7 @@ class SecureServerWindow(QMainWindow):
                         relative_path=relative_path,
                         title=title,
                         season="",
+                        db_id=db_id,
                         parent=self.scroll_content
                     )
                 
@@ -296,6 +319,7 @@ class SecureServerWindow(QMainWindow):
             print(f"Error instantiating pipeline: {e}")
         finally:
             self.canvas_container.setGraphicsEffect(None)
+            self._update_maximize_icon()
             try:
                 if file_path and os.path.exists(file_path):
                     os.remove(file_path)
@@ -304,6 +328,10 @@ class SecureServerWindow(QMainWindow):
 
     def _on_flow_delete(self, hashes: List[str], delete_files: bool, flow_widget: object) -> None:
         self.media_controller.request_deletion(hashes, delete_files)
+        
+        # Remove item logically from SQLite
+        if getattr(flow_widget, 'db_id', None) is not None:
+            self.db_manager.delete_item(flow_widget.db_id)
         # remove flow from ui
         if hasattr(flow_widget, 'close_flow'):
             flow_widget.close_flow()
@@ -366,6 +394,12 @@ class SecureServerWindow(QMainWindow):
 
                 if prog_val == 1.0:
                     human_state, pill_class, pb_style = "Completed", "PillSuccess", "PbSuccess"
+                    import json
+                    
+                    target_path = flow.relative_path.replace("\\", "/")
+                    if not self.db_manager.get_torrent_cache_by_path(target_path):
+                        self.db_manager.set_torrent_cache(matched_t.get("hash", ""), target_path, json.dumps(matched_t))
+                        self.media_controller.request_conversion(flow.relative_path)
                 else:
                     fallback = (state.replace("DL","").replace("UP","").strip().capitalize(), "PillWarning", "PbWarning")
                     human_state, pill_class, pb_style = QBIT_STATE_MAP.get(state, fallback)
@@ -385,6 +419,16 @@ class SecureServerWindow(QMainWindow):
         for flow in self.all_flows:
             if flow.flow_index == flow_index:
                 flow.title_lbl.setText(title)
+                # Persist the human-readable title back to DB so future restores work correctly
+                if hasattr(flow, 'db_id') and flow.db_id and str(flow.title_lbl.text()).startswith("tmdb:"):
+                    self.db_manager.update_item_title(flow.db_id, title)
+                elif hasattr(flow, 'db_id') and flow.db_id:
+                    # Check if the stored DB title is still a tmdb: string
+                    all_items = self.db_manager.get_all_items()
+                    for item in all_items:
+                        if item['id'] == flow.db_id and item['title'].startswith('tmdb:'):
+                            self.db_manager.update_item_title(flow.db_id, title)
+                            break
                 break
 
     def _on_details_resolved(self, flow_index: int, details: dict) -> None:
@@ -420,10 +464,22 @@ class SecureServerWindow(QMainWindow):
             if flow.flow_index == flow_index:
                 # Pass the raw array down to the card to handle
                 flow.update_telemetry_ui(episodes_data)
+                
+                # Check for completion to cache payload
+                all_finished = True
+                for ep in episodes_data:
+                    state = ep.get("db_status", "NOT STARTED").upper()
+                    if state not in ["COMPLETED", "FAILED", "REJECTED"]:
+                        all_finished = False
+                        break
+                        
+                if all_finished and episodes_data:
+                    self.db_manager.set_conversion_cache(flow.relative_path.replace("\\", "/"), json.dumps(episodes_data))
+                    
                 break
 
-    def _on_media_toggle_changed(self, button) -> None:
-        self.current_media_filter = button.text()
+    def _on_media_toggle_changed(self, index: int) -> None:
+        self.current_media_filter = "Movies" if index == 0 else "TV Series"
         self._filter_media_list(self.search_bar.get_query())
 
     def _filter_media_list(self, query: str) -> None:
@@ -458,10 +514,16 @@ class SecureServerWindow(QMainWindow):
     def _toggle_maximize(self) -> None:
         if self.isMaximized():
             self.showNormal()
-            self.btn_maximize.setIcon(self.icon_max)
         else:
             self.showMaximized()
+        self._update_maximize_icon()
+
+    def _update_maximize_icon(self) -> None:
+        self.btn_maximize.setText("")
+        if self.isMaximized():
             self.btn_maximize.setIcon(self.icon_restore)
+        else:
+            self.btn_maximize.setIcon(self.icon_max)
 
     def mousePressEvent(self, event) -> None:
         from PyQt6.QtCore import Qt
@@ -475,7 +537,8 @@ class SecureServerWindow(QMainWindow):
         if self._is_dragging and event.buttons() == Qt.MouseButton.LeftButton:
             if self.isMaximized():
                 self.showNormal()
-                self.btn_maximize.setText("🗖")
+                self.btn_maximize.setText("")
+                self.btn_maximize.setIcon(self.icon_max)
                 self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()

@@ -22,6 +22,27 @@ class LocalDBManager:
                     season TEXT
                 )
             ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS tmdb_cache (
+                    id TEXT,
+                    type TEXT,
+                    data TEXT,
+                    PRIMARY KEY (id, type)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS torrent_cache (
+                    hash TEXT PRIMARY KEY,
+                    path TEXT,
+                    data TEXT
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS conversion_cache (
+                    path TEXT PRIMARY KEY,
+                    data TEXT
+                )
+            ''')
             conn.commit()
 
     def add_item(self, relative_path: str, image_url: str, title: str, season: str = "") -> int:
@@ -51,3 +72,67 @@ class LocalDBManager:
             cursor.execute('DELETE FROM media_items WHERE id = ?', (item_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def update_item_title(self, item_id: int, title: str) -> None:
+        if item_id is None:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE media_items SET title = ? WHERE id = ?', (title, item_id))
+            conn.commit()
+
+    # --- Caching Methods ---
+    def get_tmdb_cache(self, tmdb_id: str, media_type: str) -> str:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT data FROM tmdb_cache WHERE id = ? AND type = ?', (tmdb_id, media_type))
+            row = cursor.fetchone()
+            return row[0] if row else ""
+
+    def set_tmdb_cache(self, tmdb_id: str, media_type: str, data: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO tmdb_cache (id, type, data)
+                VALUES (?, ?, ?)
+            ''', (tmdb_id, media_type, data))
+            conn.commit()
+
+    def get_torrent_cache(self, hash_val: str) -> str:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT data FROM torrent_cache WHERE hash = ?', (hash_val,))
+            row = cursor.fetchone()
+            return row[0] if row else ""
+
+    def set_torrent_cache(self, hash_val: str, path: str, data: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO torrent_cache (hash, path, data)
+                VALUES (?, ?, ?)
+            ''', (hash_val, path, data))
+            conn.commit()
+
+    def get_torrent_cache_by_path(self, path: str) -> str:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT data FROM torrent_cache WHERE path = ?', (path,))
+            row = cursor.fetchone()
+            return row[0] if row else ""
+
+    def get_conversion_cache(self, path: str) -> str:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT data FROM conversion_cache WHERE path = ?', (path,))
+            row = cursor.fetchone()
+            return row[0] if row else ""
+
+    def set_conversion_cache(self, path: str, data: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO conversion_cache (path, data)
+                VALUES (?, ?)
+            ''', (path, data))
+            conn.commit()

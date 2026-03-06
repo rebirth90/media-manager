@@ -13,6 +13,20 @@ class TMDBFetcherThread(QThread):
         self.media_type = media_type
 
     def run(self) -> None:
+        from src.models.local_db import LocalDBManager
+        import json
+        
+        db = LocalDBManager()
+        cached = db.get_tmdb_cache(self.tmdb_id, self.media_type)
+        if cached:
+            try:
+                data = json.loads(cached)
+                self.title_resolved.emit(data.get("full_title", ""))
+                self.details_resolved.emit(data.get("details", {}))
+                return
+            except json.JSONDecodeError:
+                pass
+
         token = os.getenv("TMDB_READ_ACCESS_TOKEN")
         
         # Fallback to the movie-conversion environment file where the token is known to exist
@@ -105,13 +119,23 @@ class TMDBFetcherThread(QThread):
                         except Exception:
                             pass
                 
-                self.title_resolved.emit(full_title)
-                self.details_resolved.emit({
+                
+                details_payload = {
                     "description": desc,
                     "genre": genre_str,
                     "rating": rating,
                     "image_url": img_url
-                })
+                }
+                
+                # Cache the successful payload
+                cache_payload = {
+                    "full_title": full_title,
+                    "details": details_payload
+                }
+                db.set_tmdb_cache(self.tmdb_id, self.media_type, json.dumps(cache_payload))
+
+                self.title_resolved.emit(full_title)
+                self.details_resolved.emit(details_payload)
             else:
                 self.error.emit(f"TMDB API Error: {response.status_code}")
                 self.title_resolved.emit(self.tmdb_id)
