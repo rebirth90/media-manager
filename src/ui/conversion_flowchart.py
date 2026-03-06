@@ -19,7 +19,7 @@ Muted = "#4a6480"
 Bg = "#07090f"
 CardBg = "#0e1825"
 
-# Global tracking for standalone painter
+# Global tracking for standalone painter (fallback)
 cards = {}
 paths_to_draw = []
 
@@ -62,7 +62,6 @@ class FlowWidget(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon(poly)
 
-# Utility functions (G, colOf, gapCX, etc.) as defined in original source
 def G(id_str):
     if id_str not in cards: return None
     widget = cards[id_str]
@@ -226,6 +225,7 @@ def make_tier_box(children, light=False):
     return w
 
 class ConversionFlowViewer(QWidget):
+    """Embeds the HTML pipeline visualization via QWebEngineView with Accurate Highlighting."""
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
@@ -268,33 +268,50 @@ class ConversionFlowViewer(QWidget):
                 self.update_pipeline_state(self._pending_json)
 
     def _inject_highlight_styles(self):
-        """Injects CSS for green highlights and animated 'flowing' lines."""
+        """Injects refined CSS for Green Highlighting, controlling marker sizes."""
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
-            @keyframes march { to { stroke-dashoffset: -20; } }
-            
-            /* Green Highlighting for Active Components */
+            /* Green Highlighting for ACTIVE components */
             .stage-success {
-                box-shadow: 0 0 15px rgba(74, 222, 128, 0.6), 
-                            inset 0 0 10px rgba(74, 222, 128, 0.4) !important;
-                border-color: #4ade80 !important;
+                box-shadow: 0 0 15px rgba(74, 222, 128, 0.7), 
+                            inset 0 0 8px rgba(74, 222, 128, 0.4) !important;
+                border: 2px solid #4ade80 !important;
+                opacity: 1.0 !important;
+                filter: none !important;
                 transition: all 0.4s ease-out;
             }
             
-            /* Animated flowing lines */
-            .active-path {
-                stroke: #4ade80 !important;
-                stroke-width: 3px !important;
-                stroke-dasharray: 8, 4;
-                animation: march 0.8s linear infinite !important;
-                filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
+            /* Red for actual FAILED components */
+            .stage-fail {
+                box-shadow: 0 0 12px rgba(244, 63, 94, 0.6) !important;
+                border: 2px solid #f43f5e !important;
                 opacity: 1.0 !important;
+                filter: none !important;
             }
             
-            .active-marker polygon {
-                fill: #4ade80 !important;
-                filter: drop-shadow(0 0 3px #4ade80);
+            /* Dimmed state for INACTIVE components */
+            .stage-skip {
+                opacity: 0.25 !important;
+                filter: grayscale(100%) brightness(70%) !important;
+                box-shadow: none !important;
+                border-color: rgba(148, 163, 184, 0.2) !important;
+            }
+
+            /* FIX: Prevent markers from blowing up by overriding the 3px HTML scale */
+            path {
+                stroke-width: 1.6px !important;
+            }
+            
+            /* Add drop-shadow to the dynamically generated active paths */
+            path[stroke="#4ade80"] {
+                stroke-width: 2.2px !important; /* Cap width to limit marker growth */
+                filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
+            }
+            
+            path[stroke="#f43f5e"] {
+                stroke-width: 2.2px !important; /* Cap width to limit marker growth */
+                filter: drop-shadow(0 0 5px rgba(244, 63, 94, 0.8));
             }
         `;
         document.head.appendChild(style);
@@ -302,11 +319,9 @@ class ConversionFlowViewer(QWidget):
         self._view.page().runJavaScript(css)
 
     def sizeHint(self):
-        # FIX: Return QSize instead of QPoint
         return QSize(2440, 580)
         
     def minimumSizeHint(self):
-        # FIX: Return QSize instead of QPoint
         return QSize(800, 480)
 
     def resizeEvent(self, event):
@@ -314,7 +329,7 @@ class ConversionFlowViewer(QWidget):
             super().resizeEvent(event)
         w = self.width()
         natural_w = 2440.0
-        natural_h = 580.0
+        natural_h = 580.0 
         zoom = w / natural_w if w < natural_w else 1.0
         target_h = int(natural_h * zoom)
         forced_h = max(target_h, 400)
@@ -338,51 +353,47 @@ class ConversionFlowViewer(QWidget):
             ]
             flags = {k: False for k in all_keys}
             
+            # Preserve the string 'fail' for exact mapping, otherwise convert to bool
             for k, v in raw_flags.items():
                 if k in flags:
-                    if isinstance(v, str):
+                    if isinstance(v, str) and v.lower() == 'fail':
+                        flags[k] = 'fail'
+                    elif isinstance(v, str):
                         flags[k] = v.lower() not in ('false', '0', '')
                     else:
                         flags[k] = bool(v)
 
             clean_json = json.dumps(flags)
-            if getattr(self, '_last_json', None) == clean_json:
-                return
-            
+            if getattr(self, '_last_json', None) == clean_json: return
             self._last_json = clean_json
             self._pending_json = clean_json
             
-            if not self._page_loaded:
-                return
+            if not self._page_loaded: return
 
             js = f"""
             (function() {{
                 const flags = {clean_json};
                 if (window.setPipelineState) {{ 
                     const mapped = {{}};
-                    Object.keys(flags).forEach(k => mapped[k] = flags[k] ? 'pass' : 'skip');
+                    
+                    // Route internal state to the native HTML 'pass', 'fail', 'skip' logic
+                    Object.keys(flags).forEach(k => {{
+                        if (flags[k] === 'fail') mapped[k] = 'fail';
+                        else mapped[k] = flags[k] ? 'pass' : 'skip';
+                    }});
+                    
+                    // FIX: Ensure the Tiered Loop component visually activates if internal tiers are running
+                    if (flags['p7-t1'] || flags['p7-t2'] || flags['p7-t3'] || flags['p7-audio']) {{
+                        mapped['p7-tiers'] = 'pass';
+                    }}
+                    
                     window.setPipelineState(mapped); 
                 }}
-                
-                setTimeout(() => {{
-                    document.querySelectorAll('path').forEach(p => {{
-                        const marker = p.getAttribute('marker-end');
-                        const isGreen = p.getAttribute('stroke') === '#4ade80' || 
-                                        (marker && marker.includes('green'));
-                        
-                        if (isGreen) {{
-                            p.classList.add('active-path');
-                        }} else {{
-                            p.classList.remove('active-path');
-                        }}
-                    }});
-                }}, 100);
             }})();
             """
             self._view.page().runJavaScript(js)
         except Exception:
             pass
-
 
 class TimelineApp(QMainWindow):
     def __init__(self):
@@ -407,10 +418,9 @@ class TimelineApp(QMainWindow):
         QTimer.singleShot(100, lambda: _build_pipeline_arrows())
 
 def _build_pipeline_ui(light=False):
-    bc = None
     p1 = make_phase_col("01", "Ingest", T)
-    p1.layout().addWidget(make_card("p1-input", "User Input", "Add media path to conversion.txt", T, bc))
-    p1.layout().addWidget(make_card("p1-queue", "Queue Management", "DatabaseManager reads file\nAdds to SQLite as PENDING", T, bc))
+    p1.layout().addWidget(make_card("p1-input", "User Input", "Add media path to conversion.txt", T))
+    p1.layout().addWidget(make_card("p1-queue", "Queue Management", "DatabaseManager reads file\nAdds to SQLite as PENDING", T))
     main_layout.addWidget(p1)
     p2 = make_phase_col("02", "Worker", T)
     p2.layout().addWidget(make_card("p2-dequeue", "Job Dequeue", "PENDING → PROCESSING", T))
@@ -419,8 +429,7 @@ def _build_pipeline_ui(light=False):
     main_layout.addWidget(p2)
     p3 = make_phase_col("03", "Type", Y)
     p3.layout().addWidget(make_card("p3-router", "Media Type Router", "Analyse base path", Y))
-    b3 = make_branch(make_card("p3-movie", "MOVIE", "movies_root", Gr), make_card("p3-tv", "TV", "tv_root", Y))
-    p3.layout().addWidget(b3)
+    p3.layout().addWidget(make_branch(make_card("p3-movie", "MOVIE", "movies_root", Gr), make_card("p3-tv", "TV", "tv_root", Y)))
     main_layout.addWidget(p3)
     p4 = make_phase_col("04", "Factory", Pu)
     p4.layout().addWidget(make_card("p4-movie", "Movie Processing", "Dir → largest file", Gr))
