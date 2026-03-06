@@ -5,7 +5,7 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QFrame, QScrollArea, QLayout, QSizePolicy, QGraphicsOpacityEffect)
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QPolygonF
-from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QUrl, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 
@@ -19,7 +19,7 @@ Muted = "#4a6480"
 Bg = "#07090f"
 CardBg = "#0e1825"
 
-# Global tracking for standalone painter (fallback)
+# Global tracking for standalone painter
 cards = {}
 paths_to_draw = []
 
@@ -62,6 +62,7 @@ class FlowWidget(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon(poly)
 
+# Utility functions (G, colOf, gapCX, etc.) as defined in original source
 def G(id_str):
     if id_str not in cards: return None
     widget = cards[id_str]
@@ -225,7 +226,6 @@ def make_tier_box(children, light=False):
     return w
 
 class ConversionFlowViewer(QWidget):
-    """Embeds the HTML pipeline visualization via QWebEngineView."""
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
@@ -263,13 +263,12 @@ class ConversionFlowViewer(QWidget):
         if ok:
             self._page_loaded = True
             self.fade_anim.start()
-            # Inject animation styles once page is ready
             self._inject_highlight_styles()
             if self._pending_json:
                 self.update_pipeline_state(self._pending_json)
 
     def _inject_highlight_styles(self):
-        # Specific CSS for green neon highlight and animated paths
+        """Injects CSS for green highlights and animated 'flowing' lines."""
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
@@ -303,17 +302,19 @@ class ConversionFlowViewer(QWidget):
         self._view.page().runJavaScript(css)
 
     def sizeHint(self):
-        return QPointF(2000, 580)
+        # FIX: Return QSize instead of QPoint
+        return QSize(2440, 580)
         
     def minimumSizeHint(self):
-        return QPointF(800, 480)
+        # FIX: Return QSize instead of QPoint
+        return QSize(800, 480)
 
     def resizeEvent(self, event):
         if event is not None:
             super().resizeEvent(event)
         w = self.width()
         natural_w = 2440.0
-        natural_h = 580.0 
+        natural_h = 580.0
         zoom = w / natural_w if w < natural_w else 1.0
         target_h = int(natural_h * zoom)
         forced_h = max(target_h, 400)
@@ -339,26 +340,30 @@ class ConversionFlowViewer(QWidget):
             
             for k, v in raw_flags.items():
                 if k in flags:
-                    flags[k] = v.lower() not in ('false', '0', '') if isinstance(v, str) else bool(v)
+                    if isinstance(v, str):
+                        flags[k] = v.lower() not in ('false', '0', '')
+                    else:
+                        flags[k] = bool(v)
 
             clean_json = json.dumps(flags)
-            if getattr(self, '_last_json', None) == clean_json: return
+            if getattr(self, '_last_json', None) == clean_json:
+                return
+            
             self._last_json = clean_json
             self._pending_json = clean_json
             
-            if not self._page_loaded: return
+            if not self._page_loaded:
+                return
 
             js = f"""
             (function() {{
                 const flags = {clean_json};
                 if (window.setPipelineState) {{ 
-                    // Use 'pass' for any true flag to trigger CSS transitions
                     const mapped = {{}};
                     Object.keys(flags).forEach(k => mapped[k] = flags[k] ? 'pass' : 'skip');
                     window.setPipelineState(mapped); 
                 }}
                 
-                // Secondary logic to handle line animations and glow
                 setTimeout(() => {{
                     document.querySelectorAll('path').forEach(p => {{
                         const marker = p.getAttribute('marker-end');
@@ -377,6 +382,7 @@ class ConversionFlowViewer(QWidget):
             self._view.page().runJavaScript(js)
         except Exception:
             pass
+
 
 class TimelineApp(QMainWindow):
     def __init__(self):
@@ -401,10 +407,10 @@ class TimelineApp(QMainWindow):
         QTimer.singleShot(100, lambda: _build_pipeline_arrows())
 
 def _build_pipeline_ui(light=False):
-    # (UI building remains identical to ensure structural compatibility)
+    bc = None
     p1 = make_phase_col("01", "Ingest", T)
-    p1.layout().addWidget(make_card("p1-input", "User Input", "Add media path to conversion.txt", T))
-    p1.layout().addWidget(make_card("p1-queue", "Queue Management", "DatabaseManager reads file\nAdds to SQLite as PENDING", T))
+    p1.layout().addWidget(make_card("p1-input", "User Input", "Add media path to conversion.txt", T, bc))
+    p1.layout().addWidget(make_card("p1-queue", "Queue Management", "DatabaseManager reads file\nAdds to SQLite as PENDING", T, bc))
     main_layout.addWidget(p1)
     p2 = make_phase_col("02", "Worker", T)
     p2.layout().addWidget(make_card("p2-dequeue", "Job Dequeue", "PENDING → PROCESSING", T))
