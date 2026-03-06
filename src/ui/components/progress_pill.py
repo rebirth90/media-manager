@@ -11,32 +11,47 @@ def calculate_conversion_progress(telemetry_data: dict) -> tuple[str, int]:
     """
     db_status = telemetry_data.get("db_status", "NOT STARTED").upper()
     
-    if db_status in ["NOT STARTED", "PENDING"]: return "Not Started", 0
-    if db_status == "COMPLETED": return "Completed", 100
-    if db_status in ["FAILED", "REJECTED"]: return "Failed", 0
-        
     try:
         flags = json.loads(telemetry_data.get("stage_results", "{}"))
     except (json.JSONDecodeError, TypeError):
         flags = {}
         
-    ff_prog = int(telemetry_data.get("prog", 0))
+    # Safely parse FFmpeg progress (handles empty strings and nulls safely)
+    try:
+        raw_prog = telemetry_data.get("prog", 0)
+        ff_prog = int(float(raw_prog)) if raw_prog else 0
+    except (ValueError, TypeError):
+        ff_prog = 0
 
+    # Explicit DB Status Overrides
+    if db_status == "COMPLETED" or "p8-complete" in flags: 
+        return "Completed", 100
+    if db_status in ["FAILED", "REJECTED"]: 
+        return "Failed", 0
+        
+    # Expanded Elif Chain
     if "p8-relocate" in flags or "p8-cleanup" in flags:
         return "Finalizing", 95
-    elif "p7-tiers" in flags and "p7-outcome" not in flags:
+    elif "p7-tiers" in flags or "p7-t1" in flags or "p7-t2" in flags or "p7-t3" in flags:
         overall_prog = 10 + int(ff_prog * 0.80) 
         return "Encoding Video", overall_prog
-    elif "p6-discovery" in flags:
+    elif "p7-audio" in flags or "p7-heuristics" in flags: 
+        return "Processing Audio", 9
+    elif "p6-discovery" in flags or "p6-vobsub" in flags or "p6-text" in flags:
         return "Extracting Subtitles", 8
-    elif "p5-check" in flags:
+    elif "p5-check" in flags or "p5-pass" in flags:
         return "Validating Targets", 5
+    elif "p4-movie" in flags or "p4-tv" in flags:
+        return "Processing Metadata", 4
     elif "p3-router" in flags:
         return "Initializing Media", 3
-    elif "p1-queue" in flags or "p2-dequeue" in flags:
+    elif "p1-queue" in flags or "p2-dequeue" in flags or db_status == "PENDING":
         return "Queued", 1
         
-    return "Starting", 0
+    if db_status == "PROCESSING":
+        return "Processing", 2
+
+    return "Not Started", 0
 
 def calculate_season_progress(episodes_telemetry: list[dict]) -> tuple[str, int]:
     """
@@ -63,23 +78,20 @@ def calculate_season_progress(episodes_telemetry: list[dict]) -> tuple[str, int]
             match = re.search(r'(?i)E\d{2}', path)
             ep_id = match.group().upper() if match else "EP"
             
-            # If multiple are active, we just grab the first one we see
             if not active_ep_name: 
                 active_ep_name = ep_id
                 active_ep_status = status_text
 
-    # Calculate true overall average percentage
     overall_percentage = int(total_progress_sum / total_eps)
 
     if completed_eps == total_eps:
         return "Completed", 100
     elif active_ep_name:
-        # e.g., "Converting E04 (Encoding Video)"
         return f"Converting {active_ep_name} ({active_ep_status})", overall_percentage
     elif completed_eps > 0:
         return f"Processing ({completed_eps}/{total_eps} Done)", overall_percentage
     else:
-        return "Starting Season...", overall_percentage
+        return "Not Started", overall_percentage
 
 class ProgressPillWidget(QWidget):
     def __init__(self, parent=None):
@@ -87,12 +99,14 @@ class ProgressPillWidget(QWidget):
         self._state_text = "Not Started"
         self._percentage = 0
         self.setFixedHeight(24)
-        self.setMinimumWidth(100)
+        self.setMinimumWidth(60)
     
     def set_data(self, state_text: str, percentage: int):
-        self._state_text = state_text
-        self._percentage = percentage
-        self.update()
+        # Anti-Flicker check: Don't trigger repaints if nothing actually changed
+        if self._state_text != state_text or self._percentage != percentage:
+            self._state_text = state_text
+            self._percentage = percentage
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -108,7 +122,7 @@ class ProgressPillWidget(QWidget):
         text_color = QColor("#FFFFFF")
         
         if self._state_text == "Completed": fill_color = QColor("#28A745")
-        elif self._state_text == "Failed": fill_color = QColor("#DC3545")
+        elif "Failed" in self._state_text: fill_color = QColor("#DC3545")
         elif self._state_text == "Not Started": fill_color = QColor("#6C757D")
 
         # Draw Background
@@ -128,12 +142,13 @@ class ProgressPillWidget(QWidget):
             painter.drawRect(progress_rect)
             painter.setClipping(False)
 
-        # Draw Text
+        # Draw Text (Percentage Only)
         font = self.font()
         font.setPointSize(9)
+        font.setBold(True)
         painter.setFont(font)
         painter.setPen(QPen(text_color))
-        display_text = f"{self._state_text} {self._percentage}%" if self._percentage not in [0, 100] else self._state_text
+        display_text = f"{self._percentage}%"
         painter.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, display_text)
 
         painter.end()

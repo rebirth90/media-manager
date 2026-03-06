@@ -12,8 +12,7 @@ from src.ui.conversion_flowchart import ConversionFlowViewer
 
 
 class MediaCardWidget(QFrame):
-    # Signals emitted to the external Logic Controller
-    delete_confirmed = pyqtSignal(list, bool, object)  # [hash], delete_files, flow_reference
+    delete_confirmed = pyqtSignal(list, bool, object)  
     send_to_conversion_requested = pyqtSignal(str, object)
 
     def __init__(self, index: int, relative_path: str, title: str, season: str = "", hash_val: str = "", db_id: int = -1, parent=None):
@@ -144,7 +143,7 @@ class MediaCardWidget(QFrame):
         sp_v.addWidget(self.lbl_speed_display)
         status_layout.addWidget(sp_container)
         
-        cs_container, cs_v = create_col("Conversion Status", 120)
+        cs_container, cs_v = create_col("Conversion Status", 130)
         self.lbl_conv_status = QLabel("Not Started")
         self.lbl_conv_status.setFixedHeight(24)
         self.lbl_conv_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -152,12 +151,10 @@ class MediaCardWidget(QFrame):
         cs_v.addWidget(self.lbl_conv_status)
         status_layout.addWidget(cs_container)
 
-        cp_container, cp_v = create_col("Conversion Progress", 140)
-        self.lbl_conv_progress = QLabel("0%")
-        self.lbl_conv_progress.setFixedHeight(24)
-        self.lbl_conv_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_conv_progress.setObjectName("SizeText")
-        cp_v.addWidget(self.lbl_conv_progress)
+        cp_container, cp_v = create_col("Conversion Progress", 130)
+        from src.ui.components.progress_pill import ProgressPillWidget
+        self.prog_pill_conv = ProgressPillWidget()
+        cp_v.addWidget(self.prog_pill_conv)
         status_layout.addWidget(cp_container)
 
         self.top_row_layout.addLayout(status_layout)
@@ -203,7 +200,6 @@ class MediaCardWidget(QFrame):
         self.foldout_container.setObjectName("FoldoutCard")
         self.foldout_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.foldout_container.setVisible(False)
-        # style assigned via QSS objectName
         self.foldout_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.foldout_container.setMaximumHeight(0) 
         self.foldout_layout = QVBoxLayout(self.foldout_container)
@@ -238,7 +234,6 @@ class MediaCardWidget(QFrame):
             self._foldout_anim.setDuration(220)
             self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
-        # Clear old finished connections safely
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
 
@@ -266,8 +261,8 @@ class MediaCardWidget(QFrame):
             self._foldout_anim.setStartValue(self.foldout_container.height())
             self._foldout_anim.setEndValue(0)
             self._foldout_anim.start()
+
     def _prompt_delete(self) -> None:
-        # We handle dialog inside UI, but logic deletion is emitted to controller
         if not self._current_hash:
             return
             
@@ -307,17 +302,21 @@ class MediaCardWidget(QFrame):
 
     def update_torrent_ui(self, human_state: str, pill_class: str, pb_style: str, prog_val: float, size_str: str, speed_str: str, active_state_str: str):
         self._active_qbit_state = active_state_str
-        self.lbl_state_val.setText(human_state)
-        self.lbl_state_val.setProperty("class", pill_class)
-        self.lbl_state_val.style().unpolish(self.lbl_state_val)
-        self.lbl_state_val.style().polish(self.lbl_state_val)
-        self.prog_bar_dl.setProperty("class", pb_style)
-        self.prog_bar_dl.style().unpolish(self.prog_bar_dl)
-        self.prog_bar_dl.style().polish(self.prog_bar_dl)
+        
+        if self.lbl_state_val.property("class") != pill_class or self.lbl_state_val.text() != human_state:
+            self.lbl_state_val.setText(human_state)
+            self.lbl_state_val.setProperty("class", pill_class)
+            self.lbl_state_val.style().unpolish(self.lbl_state_val)
+            self.lbl_state_val.style().polish(self.lbl_state_val)
+            
+        if self.prog_bar_dl.property("class") != pb_style:
+            self.prog_bar_dl.setProperty("class", pb_style)
+            self.prog_bar_dl.style().unpolish(self.prog_bar_dl)
+            self.prog_bar_dl.style().polish(self.prog_bar_dl)
+            
         self.lbl_size_val.setText(size_str)
         self.prog_bar_dl.setValue(int(prog_val * 100))
         
-        # Idle speed logic
         is_idle = human_state in ["Completed", "Paused", "Seeding", "Stopped", "Queued", "Checking", "Error", "Missing Files"]
         if is_idle or prog_val >= 1.0 or speed_str == "0 MB/s":
             self.lbl_speed_val.setText("-")
@@ -330,38 +329,66 @@ class MediaCardWidget(QFrame):
         if not episodes_data:
             return
             
-        # For now, just grab the first episode (movie behavior)
-        # We will refactor this to distribute to EpisodeRowWidgets for TV shows
         first_ep = episodes_data[0]
-        db_status = first_ep.get("db_status", "NOT STARTED")
+        db_status = first_ep.get("db_status", "NOT STARTED").upper()
         sub_status = first_ep.get("sub_status", "Pending")
         ff_out = first_ep.get("ff_tail", "")
         stage_flags_json = first_ep.get("stage_results", "{}")
-        
-        pill_css = "PillUnknown"
-        if db_status == "COMPLETED": pill_css = "PillSuccess"
-        elif db_status == "FAILED": pill_css = "PillDanger"
-        elif db_status not in ["NOT STARTED", "INITIALIZING"]: pill_css = "PillActive"
 
         self._active_qbit_state = f"DB Status: {db_status}"
         self._active_ffmpeg_log = ff_out
         
-        # Update Conversion Status label (plain text DB state)
-        self.lbl_conv_status.setText(db_status)
-        self.lbl_conv_status.setProperty("class", pill_css)
-        self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
-        self.lbl_conv_status.style().polish(self.lbl_conv_status)
-        
-        # Update Conversion Progress label (percentage only)
         from src.ui.components.progress_pill import calculate_conversion_progress
         state_text, percentage = calculate_conversion_progress(first_ep)
-        self.lbl_conv_progress.setText(f"{percentage}%")
         
-        self.lbl_foldout_db_status.setText(f"Conversion Status: {db_status}")
+        # 1. COMPLETION LOCK & GENTLE HIGHLIGHT MOCK
+        if db_status == "COMPLETED":
+            percentage = 100
+            state_text = "Completed"
+            try:
+                import json
+                flags = json.loads(stage_flags_json) if stage_flags_json and stage_flags_json != "{}" else {}
+                flags["p8-complete"] = True
+                
+                # Only inject a fake path if the database telemetry was completely wiped/empty
+                if not any(k.startswith("p3-") for k in flags):
+                    flags["p1-input"] = True; flags["p1-queue"] = True
+                    flags["p2-dequeue"] = True; flags["p2-pass"] = True
+                    flags["p3-router"] = True
+                    is_tv = bool(getattr(self, 'season', False))
+                    flags["p3-tv" if is_tv else "p3-movie"] = True
+                    flags["p4-tv" if is_tv else "p4-movie"] = True
+                    flags["p5-check"] = True; flags["p5-pass"] = True
+                    flags["p8-relocate"] = True
+                    flags["p8-tv" if is_tv else "p8-movie"] = True
+                    flags["p8-cleanup"] = True
+                    
+                stage_flags_json = json.dumps(flags)
+            except Exception:
+                pass
+
+        # 2. DETERMINE STYLING BASED ON STATE TEXT
+        pill_css = "PillUnknown"
+        if state_text == "Completed": pill_css = "PillSuccess"
+        elif "Failed" in state_text: pill_css = "PillDanger"
+        elif percentage > 0 or state_text not in ["Not Started", "Queued"]: pill_css = "PillActive"
+
+        # 3. ANTI-FLICKER: ONLY UPDATE STATUS TEXT IF CHANGED
+        if self.lbl_conv_status.property("class") != pill_css or self.lbl_conv_status.text() != state_text:
+            self.lbl_conv_status.setText(state_text)
+            self.lbl_conv_status.setProperty("class", pill_css)
+            self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
+            self.lbl_conv_status.style().polish(self.lbl_conv_status)
+
+        # Update visual pill (Percentage Only)
+        self.prog_pill_conv.set_data(state_text, percentage)
+        
+        self.lbl_foldout_db_status.setText(f"Conversion Status: {state_text}")
         self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
         if hasattr(self, 'flowchart_view') and stage_flags_json:
             self.flowchart_view.update_pipeline_state(stage_flags_json)
+
 
 class EpisodeRowWidget(QWidget):
     def __init__(self, ep_name: str, parent=None):
@@ -401,18 +428,28 @@ class EpisodeRowWidget(QWidget):
         status_v = QVBoxLayout()
         status_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_v.setSpacing(4)
-        status_header = QLabel("Conversion Status")
+        status_header = QLabel("Status")
         status_header.setObjectName("PillHeader")
         status_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.lbl_conv_progress = QLabel("0%")
-        self.lbl_conv_progress.setFixedHeight(24)
-        self.lbl_conv_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_conv_progress.setObjectName("SizeText")
+        self.lbl_conv_status = QLabel("Not Started")
+        self.lbl_conv_status.setProperty("class", "PillUnknown")
+        self.lbl_conv_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_v.addWidget(status_header)
-        status_v.addWidget(self.lbl_conv_progress)
-        
+        status_v.addWidget(self.lbl_conv_status)
         top_layout.addLayout(status_v)
+
+        # Conv Progress
+        prog_v = QVBoxLayout()
+        prog_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        prog_v.setSpacing(4)
+        prog_header = QLabel("Progress")
+        prog_header.setObjectName("PillHeader")
+        prog_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        from src.ui.components.progress_pill import ProgressPillWidget
+        self.prog_pill_conv = ProgressPillWidget()
+        prog_v.addWidget(prog_header)
+        prog_v.addWidget(self.prog_pill_conv)
+        top_layout.addLayout(prog_v)
         
         # Chevron
         self.btn_expand = QPushButton()
@@ -482,14 +519,47 @@ class EpisodeRowWidget(QWidget):
 
     def update_status(self, ep_data: dict):
         from src.ui.components.progress_pill import calculate_conversion_progress
-        
         state_text, percentage = calculate_conversion_progress(ep_data)
-        self.lbl_conv_progress.setText(f"{percentage}%")
-        
+        db_status = ep_data.get("db_status", "NOT STARTED").upper()
         stage_flags_json = ep_data.get("stage_results", "{}")
-        
+
+        # Mock full path highlight for Series episodes if complete without overwriting existing details
+        if db_status == "COMPLETED":
+            percentage = 100
+            state_text = "Completed"
+            try:
+                import json
+                flags = json.loads(stage_flags_json) if stage_flags_json and stage_flags_json != "{}" else {}
+                flags["p8-complete"] = True
+                
+                # Only inject a fake path if the database telemetry was completely wiped/empty
+                if not any(k.startswith("p3-") for k in flags):
+                    flags["p1-input"] = True; flags["p1-queue"] = True
+                    flags["p2-dequeue"] = True; flags["p2-pass"] = True
+                    flags["p3-router"] = True; flags["p3-tv"] = True
+                    flags["p4-tv"] = True; flags["p5-check"] = True
+                    flags["p5-pass"] = True; flags["p8-relocate"] = True
+                    flags["p8-tv"] = True; flags["p8-cleanup"] = True
+                    
+                stage_flags_json = json.dumps(flags)
+            except Exception:
+                pass
+
+        pill_css = "PillUnknown"
+        if state_text == "Completed": pill_css = "PillSuccess"
+        elif "Failed" in state_text: pill_css = "PillDanger"
+        elif percentage > 0 or state_text not in ["Not Started", "Queued"]: pill_css = "PillActive"
+
+        if self.lbl_conv_status.property("class") != pill_css or self.lbl_conv_status.text() != state_text:
+            self.lbl_conv_status.setText(state_text)
+            self.lbl_conv_status.setProperty("class", pill_css)
+            self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
+            self.lbl_conv_status.style().polish(self.lbl_conv_status)
+
+        self.prog_pill_conv.set_data(state_text, percentage)
         if stage_flags_json:
             self.flowchart.update_pipeline_state(stage_flags_json)
+
 
 class SeriesCardWidget(QFrame):
     delete_confirmed = pyqtSignal(list, bool, object)
@@ -502,7 +572,7 @@ class SeriesCardWidget(QFrame):
         self._current_hash = hash_val
         self.season = season
         self.title = title
-        self.episodes_map = {} # path -> EpisodeRowWidget
+        self.episodes_map = {} 
         
         self.setObjectName("MediaCardWrapper")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -540,26 +610,32 @@ class SeriesCardWidget(QFrame):
         top_layout.addLayout(info_v, 1)
 
         # Status Container
-        from src.ui.components.progress_pill import ProgressPillWidget
-        
         def create_col(title_str, width=None):
             w = QWidget()
             if width: w.setFixedWidth(width)
             lay = QVBoxLayout(w)
             lay.setContentsMargins(0, 0, 0, 0)
             lay.setSpacing(4)
+            lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
             t_lbl = QLabel(title_str)
-            t_lbl.setObjectName("SubText")
+            t_lbl.setObjectName("PillHeader")
+            t_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lay.addWidget(t_lbl)
             return w, lay
 
-        cs_container, cs_v = create_col("Season Conversion Status", 180)
-        self.lbl_conv_progress = QLabel("0%")
-        self.lbl_conv_progress.setFixedHeight(24)
-        self.lbl_conv_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_conv_progress.setObjectName("SizeText")
-        cs_v.addWidget(self.lbl_conv_progress)
+        cs_container, cs_v = create_col("Season Status", 130)
+        self.lbl_conv_status = QLabel("Not Started")
+        self.lbl_conv_status.setFixedHeight(24)
+        self.lbl_conv_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_conv_status.setProperty("class", "PillUnknown")
+        cs_v.addWidget(self.lbl_conv_status)
         top_layout.addWidget(cs_container)
+
+        cp_container, cp_v = create_col("Season Progress", 100)
+        from src.ui.components.progress_pill import ProgressPillWidget
+        self.prog_pill_conv = ProgressPillWidget()
+        cp_v.addWidget(self.prog_pill_conv)
+        top_layout.addWidget(cp_container)
 
         # Collapse Button
         self.btn_collapse = QPushButton("Collapse episodes")
@@ -649,14 +725,27 @@ class SeriesCardWidget(QFrame):
         self.lbl_poster.setStyleSheet("background-color: transparent;")
 
     def update_torrent_ui(self, human_state: str, pill_class: str, pb_style: str, prog_val: float, size_str: str, speed_str: str, active_state_str: str):
-        pass # Series level torrent tracking can be implemented later.
+        pass
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
         import os, re
+        from src.ui.components.progress_pill import calculate_season_progress
+        
         status_text, prog_val = calculate_season_progress(episodes_data)
-        # Update percentual progress only
-        self.lbl_conv_progress.setText(f"{prog_val}%")
+        
+        pill_css = "PillUnknown"
+        if status_text == "Completed": pill_css = "PillSuccess"
+        elif "Failed" in status_text: pill_css = "PillDanger"
+        elif prog_val > 0 or status_text not in ["Not Started", "Queued"]: pill_css = "PillActive"
+
+        if self.lbl_conv_status.property("class") != pill_css or self.lbl_conv_status.text() != status_text:
+            self.lbl_conv_status.setText(status_text)
+            self.lbl_conv_status.setProperty("class", pill_css)
+            self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
+            self.lbl_conv_status.style().polish(self.lbl_conv_status)
+
+        self.prog_pill_conv.set_data(status_text, prog_val)
         
         # Sort by episode path to ensure E1 is before E2
         for ep_data in sorted(episodes_data, key=lambda x: x.get("path", "")):

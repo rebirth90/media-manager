@@ -349,19 +349,59 @@ class ConversionFlowViewer(QWidget):
         self._view.setZoomFactor(zoom)
 
     def update_pipeline_state(self, stages_json: str) -> None:
-        """Inject stage flags into the HTML pipeline. stages_json is a JSON string like
-        '{"p1-input": true, "p2-dequeue": true, ...}'.
-        """
-        # Sanitise: ensure it's valid JSON before injecting
+        """Inject stage flags into the HTML pipeline after sanitizing mutually exclusive paths."""
         try:
             import json
-            json.loads(stages_json)  # validate
+            raw_flags = json.loads(stages_json)
+            
+            # 1. ALL KNOWN PIPELINE KEYS (Default to False so JS scrubs old highlights)
+            all_keys = [
+                "p1-input", "p1-queue", 
+                "p2-dequeue", "p2-fail", "p2-pass",
+                "p3-router", "p3-movie", "p3-tv",
+                "p4-movie", "p4-tv",
+                "p5-check", "p5-fail", "p5-pass",
+                "p6-discovery", "p6-vobsub", "p6-text",
+                "p7-heuristics", "p7-audio", "p7-t1", "p7-t2", "p7-t3", "p7-outcome",
+                "p8-relocate", "p8-movie", "p8-tv", "p8-cleanup", "p8-complete"
+            ]
+            flags = {k: False for k in all_keys}
+            
+            # 2. Overlay incoming true flags from the backend
+            for k, v in raw_flags.items():
+                if k in flags:
+                    flags[k] = bool(v)
+
+            # 3. Enforce Branch Exclusivity (Movies vs TV)
+            if flags.get("p3-movie") or flags.get("p4-movie") or flags.get("p8-movie"):
+                for key in ["p3-tv", "p4-tv", "p8-tv"]: flags[key] = False
+            elif flags.get("p3-tv") or flags.get("p4-tv") or flags.get("p8-tv"):
+                for key in ["p3-movie", "p4-movie", "p8-movie"]: flags[key] = False
+                    
+            # 4. Cleanup Failed Branches if we Passed
+            if flags.get("p5-pass"): flags["p5-fail"] = False
+            elif flags.get("p5-fail"): flags["p5-pass"] = False
+            
+            if flags.get("p2-pass"): flags["p2-fail"] = False
+            elif flags.get("p2-fail"): flags["p2-pass"] = False
+
+            # 5. Guarantee 100% Completion Highlights
+            if flags.get("p8-complete"):
+                flags["p8-cleanup"] = True
+                flags["p8-relocate"] = True
+
+            clean_json = json.dumps(flags)
+            
+            # ANTI-FLICKER: Only evaluate JS if the JSON actually changed!
+            if getattr(self, '_last_json', None) == clean_json:
+                return
+            self._last_json = clean_json
+
+            js = f"if (window.setPipelineState) {{ window.setPipelineState({clean_json}); }}"
+            self._view.page().runJavaScript(js)
+            
         except Exception:
             return
-        js = f"if (window.setPipelineState) {{ window.setPipelineState({stages_json}); }}"
-        self._view.page().runJavaScript(js)
-
-
 
 
 class TimelineApp(QMainWindow):
@@ -520,4 +560,3 @@ if __name__ == "__main__":
     window = TimelineApp()
     window.show()
     sys.exit(app.exec())
-
