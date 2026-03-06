@@ -2,11 +2,11 @@ import os
 import re
 import json
 import paramiko
+import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
 class SSHTelemetryClient(QThread):
-    # Emits a JSON encoded list of dictionaries containing episode conversion statuses
     telemetry_data = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -26,7 +26,6 @@ class SSHTelemetryClient(QThread):
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(hostname=host, username=user, password=password, timeout=5.0)
 
-            # Python script to run remotely via base64 encoded payload
             remote_script = f"""
 import sqlite3, json, os, glob, re, sys
 
@@ -35,23 +34,24 @@ remote_app_dir = {repr(remote_app_dir)}
 
 results = []
 try:
-    # ANTI-FLICKER: Force Read-Only URI mode + 10s timeout to bypass concurrent write locks
     db_path = f'{{remote_app_dir}}/conversion_data.db'
     conn = sqlite3.connect(f'file:{{db_path}}?mode=ro', uri=True, timeout=10.0)
     cur = conn.cursor()
-    cur.execute("SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE path LIKE ? ORDER BY path ASC", ('%' + target_title + '%',))
+    
+    cur.execute("SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE path LIKE ? ORDER BY id DESC", ('%' + target_title + '%',))
     rows = cur.fetchall()
     
     if not rows:
         words = [w for w in re.split(r'\\W+', target_title) if len(w) > 2]
         if words:
-            query = "SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE " + " AND ".join(["path LIKE ?"] * len(words)) + " ORDER BY path ASC"
+            query = "SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE " + " AND ".join(["path LIKE ?"] * len(words)) + " ORDER BY id DESC"
             cur.execute(query, ['%' + w + '%' for w in words])
             rows = cur.fetchall()
             
     unique_jobs = {{}}
     for db_status, stage_flags, db_path in rows:
-        unique_jobs[db_path] = (db_status, stage_flags)
+        if db_path not in unique_jobs:
+            unique_jobs[db_path] = (db_status, stage_flags)
         
     for db_path, (db_status, stage_flags) in unique_jobs.items():
         try:
@@ -147,40 +147,31 @@ try:
         }})
 
 except Exception as e:
-    print(f"Exception during SQLite read: {{e}}", file=sys.stderr)
+    pass
 
-# CRITICAL FIX: If results are empty (due to a lock error or no DB entry yet),
-# it will print `[]` rather than fabricating a "NOT STARTED" state.
-# Your UI handles `[]` perfectly by ignoring it, stopping the flicker entirely!
 print(json.dumps(results))
 """
             import base64
-            import time
             b64_script = base64.b64encode(remote_script.encode('utf-8')).decode('utf-8')
             db_cmd = f"echo '{b64_script}' | base64 -d | python3"
+
+            time.sleep(4)
 
             while True:
                 stdin, stdout, stderr = client.exec_command(db_cmd)
                 raw_output = stdout.read().decode('utf-8').strip()
-                err_output = stderr.read().decode('utf-8').strip()
-                
-                if err_output:
-                    print(f"[{self.target_title} Telemetry STDERR]: {err_output}")
                 
                 try:
-                    # Find the JSON array in the output (in case of server banners/warnings)
                     match = re.search(r'\[.*\]', raw_output, re.DOTALL)
                     if match:
                         json_str = match.group()
                         data = json.loads(json_str)
                         self.telemetry_data.emit(json_str)
                     else:
-                        # Fallback for empty/malformed
                         data = json.loads(raw_output)
                         self.telemetry_data.emit(raw_output)
                     
                     if isinstance(data, list):
-                        # Stop polling if all episodes are settled
                         all_finished = True
                         for ep in data:
                             state = ep.get("db_status", "NOT STARTED").upper()
@@ -189,14 +180,11 @@ print(json.dumps(results))
                                 break
                                 
                         if all_finished and data:
+                            # GUARDRAIL TRIGGERED: SAFELY DESTROY THREAD
                             break
                     else:
-                        self.error.emit(f"Expected JSON array. Got: {raw_output}")
                         break
                 except json.JSONDecodeError:
-                    print(f"[SSH Telemetry - {self.target_title}] JSON Parse Error. Raw: {raw_output}")
-                    self.error.emit(f"JSON Parse Error for {self.target_title}")
-                    # Continue instead of break to allow temporary server hiccups
                     time.sleep(5)
                     continue
                     

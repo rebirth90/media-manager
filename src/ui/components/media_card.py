@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QColor, QPen
 from PyQt6.QtCore import QRectF, QSize
 from PyQt6.QtWidgets import (
-    QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QSizePolicy, QDialog
+    QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea
 )
 
 from src.ui.dialogs.flow_details import FlowDetailsModal
@@ -30,7 +30,6 @@ class MediaCardWidget(QFrame):
 
         self._active_qbit_state = "Initializing..."
         self._active_ffmpeg_log = "Awaiting conversion pipeline..."
-        self._illustration_path = r"C:\Users\Codrut\.gemini\antigravity\brain\8785b3f2-114a-4ae3-86c6-da36af48ada5\isometric_drafting_illustration_1772118592306.png"
 
         self.setObjectName("MediaCardWrapper")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -83,11 +82,22 @@ class MediaCardWidget(QFrame):
         self.lbl_foldout_desc = QLabel("No description available.")
         self.lbl_foldout_desc.setObjectName("DescText")
         self.lbl_foldout_desc.setWordWrap(True)
-        self.lbl_foldout_desc.setMaximumHeight(35)
+        
+        # ADDED SCROLLBAR: Wraps the long description securely in a 45px box!
+        self.desc_scroll = QScrollArea()
+        self.desc_scroll.setWidgetResizable(True)
+        self.desc_scroll.setWidget(self.lbl_foldout_desc)
+        self.desc_scroll.setMaximumHeight(45)
+        self.desc_scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { width: 6px; background: transparent; }
+            QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
         
         info_layout.addWidget(self.title_lbl)
         info_layout.addWidget(self.lbl_foldout_genre_rating)
-        info_layout.addWidget(self.lbl_foldout_desc)
+        info_layout.addWidget(self.desc_scroll)
         self.top_row_layout.addWidget(info_container)
 
         # 3. Status Pills
@@ -334,7 +344,6 @@ class MediaCardWidget(QFrame):
         sub_status = first_ep.get("sub_status", "Pending")
         ff_out = first_ep.get("ff_tail", "")
         
-        # Safely parse JSON strings or dictionaries seamlessly
         stage_flags_raw = first_ep.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
             try:
@@ -351,13 +360,12 @@ class MediaCardWidget(QFrame):
         from src.ui.components.progress_pill import calculate_conversion_progress
         state_text, percentage = calculate_conversion_progress(first_ep)
         
-        # 1. COMPLETION LOCK & GENTLE HIGHLIGHT MOCK
+        # 1. COMPLETION LOCK
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
             stage_flags["p8-complete"] = True
             
-            # Only inject a fake path if the database telemetry was completely wiped/empty
             if not any(k.startswith("p3-") for k in stage_flags):
                 stage_flags["p1-input"] = True; stage_flags["p1-queue"] = True
                 stage_flags["p2-dequeue"] = True; stage_flags["p2-pass"] = True
@@ -376,20 +384,17 @@ class MediaCardWidget(QFrame):
         elif "Failed" in state_text: pill_css = "PillDanger"
         elif percentage > 0 or state_text not in ["Not Started", "Queued"]: pill_css = "PillActive"
 
-        # 3. ANTI-FLICKER: ONLY UPDATE STATUS TEXT IF CHANGED
         if self.lbl_conv_status.property("class") != pill_css or self.lbl_conv_status.text() != state_text:
             self.lbl_conv_status.setText(state_text)
             self.lbl_conv_status.setProperty("class", pill_css)
             self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
             self.lbl_conv_status.style().polish(self.lbl_conv_status)
 
-        # Update visual pill (Percentage Only)
         self.prog_pill_conv.set_data(state_text, percentage)
         
         self.lbl_foldout_db_status.setText(f"Conversion Status: {state_text}")
         self.lbl_foldout_sub_status.setText(f"Subtitles: {sub_status}")
         
-        # Always feed the HTML view so default gray paths override properly
         if hasattr(self, 'flowchart_view'):
             import json
             self.flowchart_view.update_pipeline_state(json.dumps(stage_flags))
@@ -527,7 +532,6 @@ class EpisodeRowWidget(QWidget):
         state_text, percentage = calculate_conversion_progress(ep_data)
         db_status = ep_data.get("db_status", ep_data.get("status", "NOT STARTED")).upper()
         
-        # Safely parse JSON strings or dictionaries seamlessly
         stage_flags_raw = ep_data.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
             try:
@@ -538,7 +542,6 @@ class EpisodeRowWidget(QWidget):
         else:
             stage_flags = stage_flags_raw.copy() if stage_flags_raw else {}
 
-        # Mock full path highlight for Series episodes if complete
         if db_status == "COMPLETED":
             percentage = 100
             state_text = "Completed"
@@ -611,11 +614,22 @@ class SeriesCardWidget(QFrame):
         self.lbl_desc = QLabel("No description available.")
         self.lbl_desc.setObjectName("DescText")
         self.lbl_desc.setWordWrap(True)
-        self.lbl_desc.setMaximumHeight(35)
+        
+        # SCROLLBAR ADDED TO SERIES AS WELL
+        self.desc_scroll = QScrollArea()
+        self.desc_scroll.setWidgetResizable(True)
+        self.desc_scroll.setWidget(self.lbl_desc)
+        self.desc_scroll.setMaximumHeight(45)
+        self.desc_scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { width: 6px; background: transparent; }
+            QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
         
         info_v.addWidget(self.title_lbl)
         info_v.addWidget(self.lbl_genre)
-        info_v.addWidget(self.lbl_desc)
+        info_v.addWidget(self.desc_scroll)
         top_layout.addLayout(info_v, 1)
 
         # Status Container
@@ -756,7 +770,6 @@ class SeriesCardWidget(QFrame):
 
         self.prog_pill_conv.set_data(status_text, prog_val)
         
-        # Sort by episode path to ensure E1 is before E2
         for ep_data in sorted(episodes_data, key=lambda x: x.get("path", "")):
             path = ep_data.get("path", "")
             if not path: continue

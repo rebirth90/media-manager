@@ -22,6 +22,21 @@ class LocalDBManager:
                     season TEXT
                 )
             ''')
+            
+            # Dynamically inject new state columns into existing databases
+            columns = [
+                ("description", "TEXT"),
+                ("genre", "TEXT"),
+                ("rating", "TEXT"),
+                ("torrent_data", "TEXT"),
+                ("conversion_data", "TEXT")
+            ]
+            for col_name, col_type in columns:
+                try:
+                    cursor.execute(f'ALTER TABLE media_items ADD COLUMN {col_name} {col_type}')
+                except sqlite3.OperationalError:
+                    pass # Column already exists
+                    
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS tmdb_cache (
                     id TEXT,
@@ -59,7 +74,7 @@ class LocalDBManager:
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute('SELECT id, relative_path, image_url, title, season FROM media_items')
+            cursor.execute('SELECT * FROM media_items')
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
 
@@ -79,6 +94,25 @@ class LocalDBManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('UPDATE media_items SET title = ? WHERE id = ?', (title, item_id))
+            conn.commit()
+
+    # --- APP STATE WRITING METHODS ---
+    def update_metadata(self, item_id: int, description: str, genre: str, rating: str):
+        if item_id is None: return
+        with self._get_connection() as conn:
+            conn.cursor().execute('UPDATE media_items SET description=?, genre=?, rating=? WHERE id=?', (description, genre, rating, item_id))
+            conn.commit()
+
+    def update_torrent_data(self, item_id: int, data: str):
+        if item_id is None: return
+        with self._get_connection() as conn:
+            conn.cursor().execute('UPDATE media_items SET torrent_data=? WHERE id=?', (data, item_id))
+            conn.commit()
+
+    def update_conversion_data(self, item_id: int, data: str):
+        if item_id is None: return
+        with self._get_connection() as conn:
+            conn.cursor().execute('UPDATE media_items SET conversion_data=? WHERE id=?', (data, item_id))
             conn.commit()
 
     # --- Caching Methods ---
