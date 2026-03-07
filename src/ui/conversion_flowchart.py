@@ -267,11 +267,10 @@ class ConversionFlowViewer(QWidget):
                 self.update_pipeline_state(self._pending_json)
 
     def _inject_highlight_styles(self):
-        """Injects refined CSS for perfectly fluid Green Highlighting animations."""
+        """Injects refined CSS for Green Highlighting."""
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
-            /* The key to a fluid loop is making the offset exactly equal to the sum of the dasharray (10 + 5 = 15) */
             @keyframes flowAnim { 
                 from { stroke-dashoffset: 15; }
                 to { stroke-dashoffset: 0; } 
@@ -374,6 +373,9 @@ class ConversionFlowViewer(QWidget):
 
             clean_json = json.dumps(flags)
             if getattr(self, '_last_json', None) == clean_json: return
+            
+            # FIX: Always cache the JSON immediately, even if the page isn't loaded yet.
+            # This ensures that when _on_load_finished fires 200ms later, the data is ready!
             self._last_json = clean_json
             self._pending_json = clean_json
             
@@ -386,8 +388,15 @@ class ConversionFlowViewer(QWidget):
                     const mapped = {{}};
                     
                     Object.keys(flags).forEach(k => {{
+                        // FIX: Explicitly prevent fail nodes from being activated as success
                         if (flags[k] === 'fail') mapped[k] = 'fail';
-                        else if (flags[k] === true || flags[k] === 'pass') mapped[k] = 'pass';
+                        else if (flags[k] === true || flags[k] === 'pass') {{
+                             if (k === 'p2-fail' || k === 'p5-fail') {{
+                                 mapped[k] = 'fail';
+                             }} else {{
+                                 mapped[k] = 'pass';
+                             }}
+                        }}
                     }});
                     
                     if (flags['p7-t1'] || flags['p7-t2'] || flags['p7-t3'] || flags['p7-audio']) {{
