@@ -15,7 +15,8 @@
       --teal: #2dd4bf;
       --yellow: #fbbf24;
       --red: #f43f5e;
-      --green: #4ade80;
+      --green: #4ade80; /* Reserved strictly for ACTIVE state */
+      --blue: #3b82f6;  /* Replaces green for Movie paths */
       --purple: #c084fc;
       --text: #f8fafc;
       --muted: #94a3b8;
@@ -35,17 +36,14 @@
       color: var(--text);
       overflow-x: auto;
       overflow-y: hidden;
-      /* Centers the inline-block #page on ultra-wide screens */
       text-align: center;
     }
 
     #page {
       position: relative;
-      /* Hardcoded width bypasses the WebKit zoom + padding clipping bug */
       width: 2440px;
       min-height: 580px;
       display: inline-block;
-      /* Reset text alignment for inner content */
       text-align: left;
     }
 
@@ -66,7 +64,6 @@
     .tl-track {
       display: flex;
       align-items: flex-start;
-      /* This perfectly centers the 2320px of nodes inside the 2440px track */
       justify-content: center;
       position: relative;
       margin-top: 10px;
@@ -76,7 +73,6 @@
     .spine {
       position: absolute;
       top: 43px;
-      /* Adjusted to perfectly cover the nodes inside the new flex center */
       left: 60px;
       right: 60px;
       height: 2px;
@@ -138,37 +134,17 @@
       color: var(--muted);
     }
 
-    .col-teal .phase-node {
-      border-color: rgba(45, 212, 191, .4);
-    }
+    .col-teal .phase-node { border-color: rgba(45, 212, 191, .4); }
+    .col-teal .ph-num { color: var(--teal); }
 
-    .col-teal .ph-num {
-      color: var(--teal);
-    }
+    .col-yellow .phase-node { border-color: rgba(251, 191, 36, .4); }
+    .col-yellow .ph-num { color: var(--yellow); }
 
-    .col-yellow .phase-node {
-      border-color: rgba(251, 191, 36, .4);
-    }
+    .col-purple .phase-node { border-color: rgba(192, 132, 252, .4); }
+    .col-purple .ph-num { color: var(--purple); }
 
-    .col-yellow .ph-num {
-      color: var(--yellow);
-    }
-
-    .col-purple .phase-node {
-      border-color: rgba(192, 132, 252, .4);
-    }
-
-    .col-purple .ph-num {
-      color: var(--purple);
-    }
-
-    .col-green .phase-node {
-      border-color: rgba(74, 222, 128, .4);
-    }
-
-    .col-green .ph-num {
-      color: var(--green);
-    }
+    .col-blue .phase-node { border-color: rgba(59, 130, 246, .4); }
+    .col-blue .ph-num { color: var(--blue); }
 
     .node-to-panel {
       width: 2px;
@@ -230,65 +206,25 @@
       font-weight: 600;
     }
 
-    .sc.teal {
-      border-left: 2px solid rgba(45, 212, 191, .5);
-    }
+    .sc.teal { border-left: 2px solid rgba(45, 212, 191, .5); }
+    .sc.teal .sc-title { color: var(--teal); }
+    .sc.teal .sc-dot { background: var(--teal); }
 
-    .sc.teal .sc-title {
-      color: var(--teal);
-    }
+    .sc.yellow { border-left: 2px solid rgba(251, 191, 36, .5); }
+    .sc.yellow .sc-title { color: var(--yellow); }
+    .sc.yellow .sc-dot { background: var(--yellow); }
 
-    .sc.teal .sc-dot {
-      background: var(--teal);
-    }
+    .sc.red { border-left: 2px solid rgba(244, 63, 94, .5); }
+    .sc.red .sc-title { color: var(--red); }
+    .sc.red .sc-dot { background: var(--red); }
 
-    .sc.yellow {
-      border-left: 2px solid rgba(251, 191, 36, .5);
-    }
+    .sc.blue { border-left: 2px solid rgba(59, 130, 246, .5); }
+    .sc.blue .sc-title { color: var(--blue); }
+    .sc.blue .sc-dot { background: var(--blue); }
 
-    .sc.yellow .sc-title {
-      color: var(--yellow);
-    }
-
-    .sc.yellow .sc-dot {
-      background: var(--yellow);
-    }
-
-    .sc.red {
-      border-left: 2px solid rgba(244, 63, 94, .5);
-    }
-
-    .sc.red .sc-title {
-      color: var(--red);
-    }
-
-    .sc.red .sc-dot {
-      background: var(--red);
-    }
-
-    .sc.green {
-      border-left: 2px solid rgba(74, 222, 128, .5);
-    }
-
-    .sc.green .sc-title {
-      color: var(--green);
-    }
-
-    .sc.green .sc-dot {
-      background: var(--green);
-    }
-
-    .sc.purple {
-      border-left: 2px solid rgba(192, 132, 252, .5);
-    }
-
-    .sc.purple .sc-title {
-      color: var(--purple);
-    }
-
-    .sc.purple .sc-dot {
-      background: var(--purple);
-    }
+    .sc.purple { border-left: 2px solid rgba(192, 132, 252, .5); }
+    .sc.purple .sc-title { color: var(--purple); }
+    .sc.purple .sc-dot { background: var(--purple); }
 
     .branch-row {
       display: flex;
@@ -299,7 +235,7 @@
       flex: 1;
     }
 
-    /* ── STAGE SUCCESS STATE ── */
+    /* ── STAGE SUCCESS STATE (Neon Green) ── */
     .sc.stage-success {
       border-left-color: var(--green) !important;
       background: rgba(74, 222, 128, 0.08) !important;
@@ -338,15 +274,11 @@
     }
 
     @keyframes spin {
-      100% {
-        transform: rotate(360deg);
-      }
+      100% { transform: rotate(360deg); }
     }
 
     @keyframes march {
-      to {
-        stroke-dashoffset: -20;
-      }
+      to { stroke-dashoffset: -20; }
     }
 
     .hg-icon {
@@ -375,11 +307,14 @@
         <marker id="m-yellow" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
           <polygon points="0 0,7 3,0 6" fill="rgba(251,191,36,.9)" />
         </marker>
-        <marker id="m-green" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
-          <polygon points="0 0,7 3,0 6" fill="rgba(74,222,128,.9)" />
-        </marker>
         <marker id="m-purple" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
           <polygon points="0 0,7 3,0 6" fill="rgba(192,132,252,.9)" />
+        </marker>
+        <marker id="m-blue" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(59,130,246,.9)" />
+        </marker>
+        <marker id="m-green" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(74,222,128,.9)" />
         </marker>
       </defs>
     </svg>
@@ -445,7 +380,7 @@
                 <div class="sc-body">Analyse base path</div>
               </div>
               <div class="branch-row">
-                <div class="sc green" id="p3-movie">
+                <div class="sc blue" id="p3-movie">
                   <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>MOVIE
                   </div>
                   <div class="sc-body"><span class="code">movies_root</span></div>
@@ -467,7 +402,7 @@
           <div class="node-to-panel"></div>
           <div class="phase-panel">
             <div class="panel-body">
-              <div class="sc green" id="p4-movie">
+              <div class="sc blue" id="p4-movie">
                 <div class="sc-title"><span class="sc-dot"></span>Movie Processing</div>
                 <div class="sc-body">Dir → largest file → Movie object<br>File → single Movie object
                 </div>
@@ -566,7 +501,7 @@
 
         <div class="col-gap" id="gap-7-8"></div>
 
-        <div class="phase-col col-green" id="col-8">
+        <div class="phase-col col-teal" id="col-8">
           <div class="phase-node"><span class="ph-icon">✅</span><span class="ph-num">08</span><span
               class="ph-lbl">Final</span></div>
           <div class="node-to-panel"></div>
@@ -577,7 +512,7 @@
                 <div class="sc-body">Move encoded <span class="code">.mp4</span> + subtitles</div>
               </div>
               <div class="branch-row">
-                <div class="sc green" id="p8-movie">
+                <div class="sc blue" id="p8-movie">
                   <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>Movies
                   </div>
                   <div class="sc-body"><span class="code">/archive/movies/</span></div>
@@ -591,7 +526,7 @@
                 <div class="sc-title"><span class="sc-dot"></span>Source Cleanup</div>
                 <div class="sc-body">Delete original · remove empty dirs</div>
               </div>
-              <div class="sc green" id="p8-complete">
+              <div class="sc teal" id="p8-complete">
                 <div class="sc-title"><span class="sc-dot"></span>✓ Job Complete</div>
                 <div class="sc-body">Status: <span class="code">COMPLETED</span><br>Log metrics</div>
               </div>
@@ -731,6 +666,8 @@
       const active = arrowKey && _activeArrows.has(arrowKey);
       const failed = arrowKey && _failedArrows.has(arrowKey);
       p.setAttribute('d', d);
+      
+      // If it's active, force it to be green. Otherwise, use the provided fallback stroke.
       p.setAttribute('stroke', active ? '#4ade80' : (failed ? '#f43f5e' : stroke));
       p.setAttribute('stroke-width', (active || failed) ? '3px' : '1.6px');
       p.setAttribute('fill', 'none');
@@ -739,6 +676,8 @@
       p.setAttribute('opacity', (active || failed) ? '1' : '0.75');
       if (dashed || active) p.setAttribute('stroke-dasharray', active ? '8 4' : '5 4');
       if (active) p.style.animation = 'march 0.7s linear infinite';
+      
+      // Crucial part: Force the marker to be m-green ONLY if active.
       if (marker) p.setAttribute('marker-end', active ? `url(#m-green)` : (failed ? `url(#m-red)` : `url(#${marker})`));
       SVG.appendChild(p);
     }
@@ -830,7 +769,7 @@
       const T = 'rgba(45,212,191,.85)';
       const Y = 'rgba(251,191,36,.85)';
       const Re = 'rgba(244,63,94,.85)';
-      const Gr = 'rgba(74,222,128,.85)';
+      const B = 'rgba(59,130,246,.85)'; // Blue instead of Green for default layout
       const Pu = 'rgba(192,132,252,.85)';
 
       V('p1-input', 'p1-queue', T, 'm-teal', undefined, 'a-p1-inq');
@@ -840,12 +779,15 @@
       LOOP_UP('p2-fail', 'p2-dequeue', Re, 'm-red', 15, 'a-p2-loop');
       FWD('p2-pass', 'p3-router', T, 'm-teal', undefined, undefined, undefined, undefined, 'a-p2-p3');
       const m3 = G('p3-movie'), tv3 = G('p3-tv');
-      V('p3-router', 'p3-movie', Gr, 'm-green', m3.cx, 'a-p3-mov');
+      
+      // Update arrows heading to Movie components to use Blue ('B' and 'm-blue')
+      V('p3-router', 'p3-movie', B, 'm-blue', m3.cx, 'a-p3-mov');
       V('p3-router', 'p3-tv', Y, 'm-yellow', tv3.cx, 'a-p3-tv');
-      FWD('p3-movie', 'p4-movie', Gr, 'm-green', -8, 0.5, 0.35, 'bottom', 'a-p3-p4m');
+      FWD('p3-movie', 'p4-movie', B, 'm-blue', -8, 0.5, 0.35, 'bottom', 'a-p3-p4m');
       FWD('p3-tv', 'p4-tv', Y, 'm-yellow', 8, 0.5, 0.65, undefined, 'a-p3-p4t');
-      FWD('p4-movie', 'p5-check', Gr, 'm-green', -8, 0.5, 0.32, undefined, 'a-p4-p5m');
+      FWD('p4-movie', 'p5-check', B, 'm-blue', -8, 0.5, 0.32, undefined, 'a-p4-p5m');
       FWD('p4-tv', 'p5-check', Y, 'm-yellow', 8, 0.5, 0.68, undefined, 'a-p4-p5t');
+      
       V('p5-check', 'p5-fail', Re, 'm-red', undefined, 'a-p5-fail');
       SKIP('p5-check', 'p5-pass', T, 'm-teal', undefined, 'a-p5-pass');
       LOOP_BACK('p5-fail', 'p2-dequeue', Re, 'm-red', 0, -15, 'a-p5-loop');
@@ -859,11 +801,13 @@
       V('p7-tiers', 'p7-outcome', Y, 'm-yellow', undefined, 'a-p7-to');
       FWD('p7-outcome', 'p8-relocate', T, 'm-teal', undefined, undefined, undefined, undefined, 'a-p7-p8');
       const m8 = G('p8-movie'), tv8 = G('p8-tv');
-      V('p8-relocate', 'p8-movie', Gr, 'm-green', m8.cx, 'a-p8-rm');
+      
+      // Replace end-state lines to use Blue/Teal
+      V('p8-relocate', 'p8-movie', B, 'm-blue', m8.cx, 'a-p8-rm');
       V('p8-relocate', 'p8-tv', Y, 'm-yellow', tv8.cx, 'a-p8-rt');
-      V('p8-movie', 'p8-cleanup', Gr, 'm-green', m8.cx, 'a-p8-mc');
+      V('p8-movie', 'p8-cleanup', B, 'm-blue', m8.cx, 'a-p8-mc');
       V('p8-tv', 'p8-cleanup', Y, 'm-yellow', tv8.cx, 'a-p8-tc');
-      V('p8-cleanup', 'p8-complete', Gr, 'm-green', undefined, 'a-p8-cc');
+      V('p8-cleanup', 'p8-complete', T, 'm-teal', undefined, 'a-p8-cc');
     }
 
     function safeDraw() {

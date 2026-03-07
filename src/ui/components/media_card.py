@@ -265,13 +265,13 @@ class MediaCardWidget(QFrame):
             self._foldout_anim.start()
 
     def _prompt_delete(self) -> None:
-        if not self._current_hash:
-            return
-            
+        # FIX ISSUE 2: Do not early return if hash is missing.
+        # Allow deletion of completed/orphaned DB items from UI.
         dialog = DeleteTorrentDialog(self.title, self.window())
         if dialog.exec() == QDialog.DialogCode.Accepted:
             delete_files = dialog.should_delete_files()
-            self.delete_confirmed.emit([self._current_hash], delete_files, self)
+            hashes_to_delete = [self._current_hash] if self._current_hash else []
+            self.delete_confirmed.emit(hashes_to_delete, delete_files, self)
 
     def set_poster_pixmap(self, raw_pixmap: QPixmap) -> None:
         scaled = raw_pixmap.scaled(self.lbl_poster.width(), self.lbl_poster.height(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
@@ -758,3 +758,11 @@ class SeriesCardWidget(QFrame):
                 
             row = self.episodes_map[path]
             row.update_status(ep_data)
+
+    def _prompt_delete(self) -> None:
+        # FIX ISSUE 2: Also allow deletion of completed/orphaned DB items from UI
+        dialog = DeleteTorrentDialog(self.title, self.window())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            delete_files = dialog.should_delete_files()
+            hashes_to_delete = [self._current_hash] if self._current_hash else []
+            self.delete_confirmed.emit(hashes_to_delete, delete_files, self)

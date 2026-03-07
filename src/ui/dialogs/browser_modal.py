@@ -34,6 +34,7 @@ class BrowserModalDialog(QDialog):
         self.web_view.setStyleSheet("border-radius: 12px;")
         layout.addWidget(self.web_view)
 
+        # Connection that caused signal duplication on multiple opens
         self.profile.downloadRequested.connect(self._on_download_requested)
         self.web_view.page().loadFinished.connect(self._on_page_loaded)
 
@@ -48,10 +49,14 @@ class BrowserModalDialog(QDialog):
         request.setDownloadDirectory(temp_dir)
         request.accept()
         
-        state_dict = {"img_url": None, "title": None, "season": None, "completed": False}
+        # Added tracking to prevent multiple signals from firing simultaneously
+        state_dict = {"img_url": None, "title": None, "season": None, "completed": False, "emitted": False}
         
         def try_finish():
             if state_dict["completed"] and state_dict["title"] is not None:
+                if state_dict["emitted"]: return
+                state_dict["emitted"] = True
+                
                 file_path = request.downloadDirectory() + os.sep + request.downloadFileName()
                 print(f"DEBUG: Download completed successfully! File: {file_path}")
                 self.torrent_downloaded.emit(file_path, state_dict["img_url"], state_dict["title"], state_dict.get("season") or "")
@@ -166,8 +171,23 @@ class BrowserModalDialog(QDialog):
         self.web_view.setDisabled(False)
         self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
 
+    # FIX ISSUE 3: Safely decouple signals universally to avoid firing twice
+    def _cleanup_connections(self):
+        try:
+            self.profile.downloadRequested.disconnect(self._on_download_requested)
+        except Exception:
+            pass
+
+    def accept(self):
+        self._cleanup_connections()
+        super().accept()
+
+    def reject(self):
+        self._cleanup_connections()
+        super().reject()
+
     def closeEvent(self, event) -> None:
-        self.profile.downloadRequested.disconnect(self._on_download_requested)
+        self._cleanup_connections()
         if self.web_view.page():
             self.web_view.page().deleteLater()
         self.web_view.setPage(None)

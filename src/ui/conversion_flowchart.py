@@ -13,7 +13,7 @@ from PyQt6.QtWebEngineCore import QWebEngineSettings
 T = "#00d4c8"  # Teal
 Y = "#f5c842"  # Yellow
 Re = "#ff5564" # Red
-Gr = "#3ddc84" # Green
+B = "#3b82f6"  # Blue (Replaces Green to prevent Active State visual conflicts)
 Pu = "#b388ff" # Purple
 Muted = "#4a6480"
 Bg = "#07090f"
@@ -268,10 +268,12 @@ class ConversionFlowViewer(QWidget):
                 self.update_pipeline_state(self._pending_json)
 
     def _inject_highlight_styles(self):
-        """Injects refined CSS for Green Highlighting, controlling marker sizes."""
+        """Injects refined CSS for Green Highlighting, controlling marker sizes natively."""
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
+            @keyframes flowAnim { to { stroke-dashoffset: -20; } }
+            
             /* Green Highlighting for ACTIVE components */
             .stage-success {
                 box-shadow: 0 0 15px rgba(74, 222, 128, 0.7), 
@@ -298,20 +300,30 @@ class ConversionFlowViewer(QWidget):
                 border-color: rgba(148, 163, 184, 0.2) !important;
             }
 
-            /* FIX: Prevent markers from blowing up by overriding the 3px HTML scale */
-            path {
-                stroke-width: 1.6px !important;
-            }
+            path { stroke-width: 1.6px !important; }
             
-            /* Add drop-shadow to the dynamically generated active paths */
+            /* Pure CSS Animation - No JS setTimeout needed! */
             path[stroke="#4ade80"] {
-                stroke-width: 2.2px !important; /* Cap width to limit marker growth */
+                stroke-width: 2.2px !important; 
+                stroke-dasharray: 10, 5;
+                animation: flowAnim 1s linear infinite !important;
                 filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
+                opacity: 1.0 !important;
             }
             
             path[stroke="#f43f5e"] {
-                stroke-width: 2.2px !important; /* Cap width to limit marker growth */
+                stroke-width: 2.2px !important; 
                 filter: drop-shadow(0 0 5px rgba(244, 63, 94, 0.8));
+                opacity: 1.0 !important;
+            }
+            
+            /* Target the arrowheads to match the neon green */
+            path[marker-end*="green"] {
+                stroke: #4ade80 !important;
+                stroke-width: 2.2px !important;
+                stroke-dasharray: 10, 5;
+                animation: flowAnim 1s linear infinite !important;
+                filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
             }
         `;
         document.head.appendChild(style);
@@ -382,7 +394,7 @@ class ConversionFlowViewer(QWidget):
                         else mapped[k] = flags[k] ? 'pass' : 'skip';
                     }});
                     
-                    // FIX: Ensure the Tiered Loop component visually activates if internal tiers are running
+                    // Ensure the Tiered Loop component visually activates if internal tiers are running
                     if (flags['p7-t1'] || flags['p7-t2'] || flags['p7-t3'] || flags['p7-audio']) {{
                         mapped['p7-tiers'] = 'pass';
                     }}
@@ -422,40 +434,48 @@ def _build_pipeline_ui(light=False):
     p1.layout().addWidget(make_card("p1-input", "User Input", "Add media path to conversion.txt", T))
     p1.layout().addWidget(make_card("p1-queue", "Queue Management", "DatabaseManager reads file\nAdds to SQLite as PENDING", T))
     main_layout.addWidget(p1)
+    
     p2 = make_phase_col("02", "Worker", T)
     p2.layout().addWidget(make_card("p2-dequeue", "Job Dequeue", "PENDING → PROCESSING", T))
     p2.layout().addWidget(make_card("p2-fail", "Path Validation — FAIL", "Rejects /share/seeding\nMarks FAILED", Re))
     p2.layout().addWidget(make_card("p2-pass", "Path Validation — PASS", "Path accepted, proceed", T))
     main_layout.addWidget(p2)
+    
     p3 = make_phase_col("03", "Type", Y)
     p3.layout().addWidget(make_card("p3-router", "Media Type Router", "Analyse base path", Y))
-    p3.layout().addWidget(make_branch(make_card("p3-movie", "MOVIE", "movies_root", Gr), make_card("p3-tv", "TV", "tv_root", Y)))
+    p3.layout().addWidget(make_branch(make_card("p3-movie", "MOVIE", "movies_root", B), make_card("p3-tv", "TV", "tv_root", Y)))
     main_layout.addWidget(p3)
+    
     p4 = make_phase_col("04", "Factory", Pu)
-    p4.layout().addWidget(make_card("p4-movie", "Movie Processing", "Dir → largest file", Gr))
+    p4.layout().addWidget(make_card("p4-movie", "Movie Processing", "Dir → largest file", B))
     p4.layout().addWidget(make_card("p4-tv", "TV Series Processing", "Dir → scan .mkv .mp4", Y))
     main_layout.addWidget(p4)
+    
     p5 = make_phase_col("05", "Check", Y)
     p5.layout().addWidget(make_card("p5-check", "MP4 Existence Check", "Does target .mp4 exist?", Y))
     p5.layout().addWidget(make_card("p5-fail", "EXISTS → Fast Fail", "Skip encode", Re))
     p5.layout().addWidget(make_card("p5-pass", "NOT EXISTS → Continue", "Proceed", T))
     main_layout.addWidget(p5)
+    
     p6 = make_phase_col("06", "Subs", Pu)
     p6.layout().addWidget(make_card("p6-discovery", "Subtitle Discovery", "Find external", Pu))
     p6.layout().addWidget(make_card("p6-vobsub", "Binary VobSub", ".idx / MPEG-PS", Pu))
     p6.layout().addWidget(make_card("p6-text", "Text Subtitles", ".srt .ass", Pu))
     main_layout.addWidget(p6)
+    
     p7 = make_phase_col("07", "Encode", T)
     p7.layout().addWidget(make_card("p7-heuristics", "Heuristics Check", "Query DB", T))
     p7.layout().addWidget(make_card("p7-audio", "Audio Processing", "5.1/7.1 → 256k", Pu))
     p7.layout().addWidget(make_tier_box([make_card("p7-t1", "Tier 1", "Max Quality", Pu), make_card("p7-t2", "Tier 2", "Balanced", T)]))
     p7.layout().addWidget(make_card("p7-outcome", "Outcome Handler", "Success → save", Y))
     main_layout.addWidget(p7)
-    p8 = make_phase_col("08", "Final", Gr)
+    
+    # Replaced 'Gr' with 'T' & 'B' here to prevent visual clash with Active Neon Green
+    p8 = make_phase_col("08", "Final", T)
     p8.layout().addWidget(make_card("p8-relocate", "File Relocation", "Move files", T))
-    p8.layout().addWidget(make_branch(make_card("p8-movie", "Movies", "/archive/movies/", Gr), make_card("p8-tv", "TV", "/archive/tv/", Y)))
+    p8.layout().addWidget(make_branch(make_card("p8-movie", "Movies", "/archive/movies/", B), make_card("p8-tv", "TV", "/archive/tv/", Y)))
     p8.layout().addWidget(make_card("p8-cleanup", "Source Cleanup", "Delete original", T))
-    p8.layout().addWidget(make_card("p8-complete", "✓ Job Complete", "COMPLETED", Gr))
+    p8.layout().addWidget(make_card("p8-complete", "✓ Job Complete", "COMPLETED", T))
     main_layout.addWidget(p8)
 
 def _build_pipeline_arrows():
@@ -467,12 +487,15 @@ def _build_pipeline_arrows():
     LOOP_UP('p2-fail', 'p2-dequeue', Re)
     FWD('p2-pass', 'p3-router', T)
     m3, tv3 = G('p3-movie'), G('p3-tv')
-    V('p3-router', 'p3-movie', Gr, x=m3['cx'])
+    
+    # Arrows routing to the Movie tracks are now Blue (B) instead of Green
+    V('p3-router', 'p3-movie', B, x=m3['cx'])
     V('p3-router', 'p3-tv', Y, x=tv3['cx'])
-    FWD('p3-movie', 'p4-movie', Gr, -8, 0, 0.35)
+    FWD('p3-movie', 'p4-movie', B, -8, 0, 0.35)
     FWD('p3-tv', 'p4-tv', Y, 8, 12, 0.65)
-    FWD('p4-movie', 'p5-check', Gr, -8, 0, 0.32)
+    FWD('p4-movie', 'p5-check', B, -8, 0, 0.32)
     FWD('p4-tv', 'p5-check', Y, 8, 0, 0.68)
+    
     V('p5-check', 'p5-fail', Re)
     SKIP('p5-check', 'p5-pass', T)
     LOOP_BACK('p5-fail', 'p2-dequeue', Re, 0)
@@ -484,11 +507,13 @@ def _build_pipeline_arrows():
     V('p7-heuristics', 'p7-audio', T)
     FWD('p7-outcome', 'p8-relocate', T)
     m8, tv8 = G('p8-movie'), G('p8-tv')
-    V('p8-relocate', 'p8-movie', Gr, x=m8['cx'])
+    
+    # End-stage paths mapped to the new colors
+    V('p8-relocate', 'p8-movie', B, x=m8['cx'])
     V('p8-relocate', 'p8-tv', Y, x=tv8['cx'])
-    V('p8-movie', 'p8-cleanup', Gr, x=m8['cx'])
+    V('p8-movie', 'p8-cleanup', B, x=m8['cx'])
     V('p8-tv', 'p8-cleanup', Y, x=tv8['cx'])
-    V('p8-cleanup', 'p8-complete', Gr)
+    V('p8-cleanup', 'p8-complete', T)
     main_widget.update()
 
 if __name__ == "__main__":
