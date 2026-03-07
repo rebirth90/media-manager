@@ -17,34 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("MediaController")
 
-class QueueAppenderThread(QThread):
-    finished_appending = pyqtSignal()
-    error = pyqtSignal(str)
-
-    def __init__(self, target_path: str, parent=None):
-        super().__init__(parent)
-        self.target_path = target_path
-
-    def run(self):
-        try:
-            # Conversion file path
-            conv_file = r"\\192.168.20.102\Media\conversion.txt"
-            logger.info(f"[Conversion Queue] Attempting to append: {self.target_path}")
-            
-            with open(conv_file, "a", encoding="utf-8") as f:
-                f.write(self.target_path + "\n")
-            
-            logger.info("[Conversion Queue] Successfully appended to conversion.txt")
-            self.finished_appending.emit()
-        except Exception as e:
-            logger.error(f"[Conversion Queue] Failed to write to {conv_file}: {str(e)}")
-            self.error.emit(str(e))
-
 
 class MediaController(QObject):
     """
     Central Controller for handling Media Business Logic.
-    Decoupled from UI components.
+    Decoupled from UI components. Operates in read-only telemetry mode for conversions.
     """
     # Signals to update the UI
     torrents_updated = pyqtSignal(list)
@@ -120,12 +97,13 @@ class MediaController(QObject):
         thread.start()
 
     def request_conversion(self, relative_path: str):
+        """
+        Called when a torrent completes.
+        App is now in strictly read-only telemetry mode. Bypassing conversion.txt append.
+        qBittorrent handles the script triggering natively.
+        """
         target_path = relative_path.replace("\\", "/") 
-        logger.info(f"Conversion request received for: {target_path}")
-        queue_thread = QueueAppenderThread(target_path, self)
-        queue_thread.error.connect(lambda err: logger.error(f"Conversion Queue Error: {err}"))
-        self._threads.append(queue_thread)
-        queue_thread.start()
+        logger.info(f"[Read-Only Mode] Torrent completed for: {target_path}. Deferring trigger to native qBittorrent script.")
 
     def request_deletion(self, hashes: List[str], delete_files: bool):
         try:

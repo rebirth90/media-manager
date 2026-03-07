@@ -14,6 +14,12 @@ class SSHTelemetryClient(QThread):
         super().__init__(parent)
         self.target_title = target_title
         self.safe_title = re.sub(r'[\\/*?:"<>| \']', "_", self.target_title)
+        self._is_running = True
+
+    def stop(self):
+        """Allows the application to gracefully kill the thread."""
+        self._is_running = False
+        self.wait()
 
     def run(self) -> None:
         host = os.getenv("SSH_HOST", "192.168.10.109")
@@ -162,24 +168,34 @@ print(json.dumps(results))
 """
             import base64
             b64_script = base64.b64encode(remote_script.encode('utf-8')).decode('utf-8')
-            db_cmd = f"echo '{b64_script}' | base64 -d | python3"
+            
+            # Robust, distro-independent execution bypassing echo/pipe complexities
+            db_cmd = f"python3 -c \"import base64; exec(base64.b64decode('{b64_script}').decode('utf-8'))\""
 
-            while True:
+            while self._is_running:
                 stdin, stdout, stderr = client.exec_command(db_cmd)
                 raw_output = stdout.read().decode('utf-8').strip()
+                
+                # CRITICAL: Close streams explicitly to prevent SSH Channel leaks (MaxSessions exhaustion)
+                stdin.close()
+                stdout.close()
+                stderr.close()
                 
                 try:
                     match = re.search(r'\[.*\]', raw_output, re.DOTALL)
                     if match:
                         json_str = match.group()
                         self.telemetry_data.emit(json_str)
-                    else:
+                    elif raw_output:
                         self.telemetry_data.emit(raw_output)
-                        
                 except json.JSONDecodeError:
                     pass
                     
-                time.sleep(3)
+                # Iterative sleep ensures instantaneous shutdown when self._is_running flips
+                for _ in range(30):
+                    if not self._is_running:
+                        break
+                    time.sleep(0.1)
 
             client.close()
         except Exception as e:

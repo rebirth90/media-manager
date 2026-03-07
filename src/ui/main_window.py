@@ -169,6 +169,13 @@ class SecureServerWindow(QMainWindow):
                     import json
                     try:
                         t_info = json.loads(t_data)
+                        
+                        # Restore unique identifiers for exact matching
+                        if "hash" in t_info:
+                            flow._current_hash = t_info["hash"]
+                        if "name" in t_info:
+                            flow._expected_torrent_name = t_info["name"]
+                            
                         flow.update_torrent_ui(
                             human_state=t_info.get("human_state", "Unknown"),
                             pill_class=t_info.get("pill_class", "PillUnknown"),
@@ -276,6 +283,9 @@ class SecureServerWindow(QMainWindow):
 
     def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str, season: str = "") -> None:
         try:
+            # Extract the exact scene name from the .torrent file to use for flawless matching
+            torrent_name = os.path.splitext(os.path.basename(file_path))[0]
+            
             blur_effect = QGraphicsBlurEffect()
             blur_effect.setBlurRadius(25)
             self.canvas_container.setGraphicsEffect(blur_effect)
@@ -298,6 +308,10 @@ class SecureServerWindow(QMainWindow):
                 flow.delete_confirmed.connect(self._on_flow_delete)
                 flow.conversion_completed = False
                 flow.torrent_completed = False
+                
+                # Bind the expected name so _update_qbit_db_globally can hunt it down precisely
+                flow._expected_torrent_name = torrent_name 
+                
                 self.all_flows.append(flow)
                 self.flows_layout.addWidget(flow)
                 
@@ -326,26 +340,52 @@ class SecureServerWindow(QMainWindow):
         self.flows_layout.removeWidget(flow_widget)
 
     def _update_qbit_db_globally(self, torrents_list: list) -> None:
+        # Collect all hashes currently claimed by rows to avoid duplicate assignment
+        known_hashes = {f._current_hash for f in self.all_flows if getattr(f, '_current_hash', None)}
+
         for flow in self.all_flows:
             if getattr(flow, 'torrent_completed', False):
                 continue
                 
             matched_t = None
-            target_suffix = flow.relative_path.replace("\\", "/")
             
-            for t in torrents_list:
-                sp = t.get('save_path', '').replace("\\", "/")
-                if sp.endswith(target_suffix) or target_suffix in sp:
-                    matched_t = t
-                    break
+            # Match Strategy 1: Exact Hash (For restored sessions and persistent tracking)
+            if getattr(flow, '_current_hash', None):
+                for t in torrents_list:
+                    if t.get('hash') == flow._current_hash:
+                        matched_t = t
+                        break
+            
+            # Match Strategy 2: Exact Scene Name (Matches newly added downloads from modal)
+            if not matched_t and getattr(flow, '_expected_torrent_name', None):
+                for t in torrents_list:
+                    if t.get('name') == flow._expected_torrent_name:
+                        matched_t = t
+                        break
+                        
+            # Match Strategy 3: Fallback by Save Path (Safeguarded against taking other flows' torrents)
+            if not matched_t:
+                target_suffix = flow.relative_path.replace("\\", "/")
+                candidates = []
+                for t in torrents_list:
+                    sp = t.get('save_path', '').replace("\\", "/")
+                    if (sp.endswith(target_suffix) or target_suffix in sp) and t.get('hash') not in known_hashes:
+                        candidates.append(t)
+                
+                if candidates:
+                    candidates.sort(key=lambda x: x.get('added_on', 0), reverse=True)
+                    matched_t = candidates[0]
                     
             if matched_t and getattr(flow, 'db_id', None):
+                # Lock in the identifiers
                 flow._current_hash = matched_t.get('hash', '')
                 flow._current_torrent_name = matched_t.get('name', '')
+                known_hashes.add(flow._current_hash)
+                
                 prog_val = matched_t.get('progress', 0.0)
                 state = matched_t.get('state', 'Unknown')
                 dlspeed = matched_t.get('dlspeed', 0)
-                size = matched_t.get('size', 0)
+                size = matched_t.get('total_size', matched_t.get('size', 0)) # Ensure raw bytes are grabbed
                 
                 QBIT_STATE_MAP = {
                     "downloading":          ("Downloading",   "PillDownloading", "PbActive"),
@@ -389,6 +429,8 @@ class SecureServerWindow(QMainWindow):
                 
                 import json
                 t_info = {
+                    "hash": flow._current_hash,
+                    "name": flow._current_torrent_name,
                     "human_state": human_state,
                     "pill_class": pill_class,
                     "pb_style": pb_style,
@@ -404,7 +446,6 @@ class SecureServerWindow(QMainWindow):
             if flow.flow_index == flow_index:
                 if getattr(flow, 'db_id', None):
                     self.db_manager.update_item_title(flow.db_id, title)
-                # Overwrite internal title flag instantly and rewrite the front-end label
                 flow.title = title
                 season = getattr(flow, 'season', "")
                 flow.title_lbl.setText(f"{title} — {season}" if season else title)
