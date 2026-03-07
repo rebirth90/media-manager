@@ -17,7 +17,8 @@ class TorrentPollingThread(QThread):
 
     def run(self) -> None:
         try:
-            client = qbittorrentapi.Client(host=f"{self.host}:{self.port}", username=os.getenv("QBIT_USER", "admin"), password=os.getenv("QBIT_PASS", "adminadmin"))
+            # FIX: Added http:// to the host string
+            client = qbittorrentapi.Client(host=f"http://{self.host}:{self.port}", username=os.getenv("QBIT_USER", "admin"), password=os.getenv("QBIT_PASS", "adminadmin"))
             client.auth_log_in()
         except Exception as e:
             self.error.emit(f"Polling Auth Failed: {str(e)}")

@@ -13,13 +13,13 @@ from PyQt6.QtWebEngineCore import QWebEngineSettings
 T = "#00d4c8"  # Teal
 Y = "#f5c842"  # Yellow
 Re = "#ff5564" # Red
-B = "#3b82f6"  # Blue (Replaces Green to prevent Active State visual conflicts)
+B = "#3b82f6"  # Blue 
 Pu = "#b388ff" # Purple
 Muted = "#4a6480"
 Bg = "#07090f"
 CardBg = "#0e1825"
 
-# Global tracking for standalone painter (fallback)
+# Global tracking for standalone painter
 cards = {}
 paths_to_draw = []
 
@@ -225,7 +225,6 @@ def make_tier_box(children, light=False):
     return w
 
 class ConversionFlowViewer(QWidget):
-    """Embeds the HTML pipeline visualization via QWebEngineView with Accurate Highlighting."""
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
@@ -268,13 +267,16 @@ class ConversionFlowViewer(QWidget):
                 self.update_pipeline_state(self._pending_json)
 
     def _inject_highlight_styles(self):
-        """Injects refined CSS for Green Highlighting, controlling marker sizes natively."""
+        """Injects refined CSS for perfectly fluid Green Highlighting animations."""
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
-            @keyframes flowAnim { to { stroke-dashoffset: -20; } }
+            /* The key to a fluid loop is making the offset exactly equal to the sum of the dasharray (10 + 5 = 15) */
+            @keyframes flowAnim { 
+                from { stroke-dashoffset: 15; }
+                to { stroke-dashoffset: 0; } 
+            }
             
-            /* Green Highlighting for ACTIVE components */
             .stage-success {
                 box-shadow: 0 0 15px rgba(74, 222, 128, 0.7), 
                             inset 0 0 8px rgba(74, 222, 128, 0.4) !important;
@@ -284,7 +286,6 @@ class ConversionFlowViewer(QWidget):
                 transition: all 0.4s ease-out;
             }
             
-            /* Red for actual FAILED components */
             .stage-fail {
                 box-shadow: 0 0 12px rgba(244, 63, 94, 0.6) !important;
                 border: 2px solid #f43f5e !important;
@@ -292,7 +293,6 @@ class ConversionFlowViewer(QWidget):
                 filter: none !important;
             }
             
-            /* Dimmed state for INACTIVE components */
             .stage-skip {
                 opacity: 0.25 !important;
                 filter: grayscale(100%) brightness(70%) !important;
@@ -302,10 +302,9 @@ class ConversionFlowViewer(QWidget):
 
             path { stroke-width: 1.6px !important; }
             
-            /* Pure CSS Animation - No JS setTimeout needed! */
             path[stroke="#4ade80"] {
                 stroke-width: 2.2px !important; 
-                stroke-dasharray: 10, 5;
+                stroke-dasharray: 10, 5 !important;
                 animation: flowAnim 1s linear infinite !important;
                 filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
                 opacity: 1.0 !important;
@@ -317,11 +316,10 @@ class ConversionFlowViewer(QWidget):
                 opacity: 1.0 !important;
             }
             
-            /* Target the arrowheads to match the neon green */
             path[marker-end*="green"] {
                 stroke: #4ade80 !important;
                 stroke-width: 2.2px !important;
-                stroke-dasharray: 10, 5;
+                stroke-dasharray: 10, 5 !important;
                 animation: flowAnim 1s linear infinite !important;
                 filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
             }
@@ -365,7 +363,6 @@ class ConversionFlowViewer(QWidget):
             ]
             flags = {k: False for k in all_keys}
             
-            # Preserve the string 'fail' for exact mapping, otherwise convert to bool
             for k, v in raw_flags.items():
                 if k in flags:
                     if isinstance(v, str) and v.lower() == 'fail':
@@ -388,13 +385,11 @@ class ConversionFlowViewer(QWidget):
                 if (window.setPipelineState) {{ 
                     const mapped = {{}};
                     
-                    // Route internal state to the native HTML 'pass', 'fail', 'skip' logic
                     Object.keys(flags).forEach(k => {{
                         if (flags[k] === 'fail') mapped[k] = 'fail';
-                        else mapped[k] = flags[k] ? 'pass' : 'skip';
+                        else if (flags[k] === true || flags[k] === 'pass') mapped[k] = 'pass';
                     }});
                     
-                    // Ensure the Tiered Loop component visually activates if internal tiers are running
                     if (flags['p7-t1'] || flags['p7-t2'] || flags['p7-t3'] || flags['p7-audio']) {{
                         mapped['p7-tiers'] = 'pass';
                     }}
@@ -470,7 +465,6 @@ def _build_pipeline_ui(light=False):
     p7.layout().addWidget(make_card("p7-outcome", "Outcome Handler", "Success → save", Y))
     main_layout.addWidget(p7)
     
-    # Replaced 'Gr' with 'T' & 'B' here to prevent visual clash with Active Neon Green
     p8 = make_phase_col("08", "Final", T)
     p8.layout().addWidget(make_card("p8-relocate", "File Relocation", "Move files", T))
     p8.layout().addWidget(make_branch(make_card("p8-movie", "Movies", "/archive/movies/", B), make_card("p8-tv", "TV", "/archive/tv/", Y)))
@@ -488,7 +482,6 @@ def _build_pipeline_arrows():
     FWD('p2-pass', 'p3-router', T)
     m3, tv3 = G('p3-movie'), G('p3-tv')
     
-    # Arrows routing to the Movie tracks are now Blue (B) instead of Green
     V('p3-router', 'p3-movie', B, x=m3['cx'])
     V('p3-router', 'p3-tv', Y, x=tv3['cx'])
     FWD('p3-movie', 'p4-movie', B, -8, 0, 0.35)
@@ -508,7 +501,6 @@ def _build_pipeline_arrows():
     FWD('p7-outcome', 'p8-relocate', T)
     m8, tv8 = G('p8-movie'), G('p8-tv')
     
-    # End-stage paths mapped to the new colors
     V('p8-relocate', 'p8-movie', B, x=m8['cx'])
     V('p8-relocate', 'p8-tv', Y, x=tv8['cx'])
     V('p8-movie', 'p8-cleanup', B, x=m8['cx'])
