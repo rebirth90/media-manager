@@ -8,7 +8,7 @@ from src.presentation.utils.ui_helpers import apply_blur_effect, remove_blur_eff
 
 from src.ui.dialogs.browser_modal import BrowserModalDialog
 from src.ui.dialogs.media_category import MediaCategoryDialog
-from src.core.media_controller import parse_tv_title
+from src.application.media_controller import parse_tv_title
 from src.application.use_cases.media_use_cases import AddMediaUseCase
 
 class MainDashboard(QMainWindow):

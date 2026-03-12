@@ -268,7 +268,6 @@ class ConversionFlowViewer(QWidget):
         if title.startswith("PIPELINE_HEIGHT:"):
             try:
                 h = int(title.split(":")[1])
-                print(f"[DEBUG FlowViewer] JS reported height: {h}")
                 self._view.setFixedHeight(h)
                 self.setFixedHeight(h)
                 self.height_calculated.emit(h)

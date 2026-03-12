@@ -4,11 +4,11 @@ from typing import List, Any
 import qbittorrentapi
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 
-from src.core.image_downloader import ImageDownloaderThread
-from src.core.torrent_poller import TorrentPollingThread
-from src.core.tmdb_fetcher import TMDBFetcherThread, TMDBEpisodeFetcherThread
-from src.services.qbittorrent import QBittorrentClient, QBittorrentFilesWorker
-from src.services.ssh_telemetry import SSHTelemetryClient
+from src.infrastructure.services.image_downloader import ImageDownloaderThread
+from src.infrastructure.services.torrent_poller import TorrentPollingThread
+from src.infrastructure.services.tmdb_fetcher import TMDBFetcherThread, TMDBEpisodeFetcherThread
+from src.infrastructure.services.qbittorrent import QBittorrentClient, QBittorrentFilesWorker
+from src.infrastructure.services.ssh_client import SSHTelemetryClient
 
 import re
 

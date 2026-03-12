@@ -1,23 +1,23 @@
 import os
 import requests
+import json
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from src.domain.repositories import IMediaRepository
 
 class TMDBFetcherThread(QThread):
     title_resolved = pyqtSignal(str)
     details_resolved = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, tmdb_id: str, media_type: str, parent=None):
+    def __init__(self, repo: IMediaRepository, tmdb_id: str, media_type: str, parent=None):
         super().__init__(parent)
+        self.repo = repo
         self.tmdb_id = tmdb_id
         self.media_type = media_type
 
     def run(self) -> None:
-        from src.infrastructure.repositories.sqlite_media_repository import SQLiteMediaRepository
-        import json
-        
-        db = SQLiteMediaRepository()
-        cached = db.get_tmdb_cache(self.tmdb_id, self.media_type)
+        cached = self.repo.get_tmdb_cache(self.tmdb_id, self.media_type)
         if cached:
             try:
                 data = json.loads(cached)
@@ -131,7 +131,7 @@ class TMDBFetcherThread(QThread):
                     "full_title": full_title,
                     "details": details_payload
                 }
-                db.set_tmdb_cache(self.tmdb_id, self.media_type, json.dumps(cache_payload))
+                self.repo.set_tmdb_cache(self.tmdb_id, self.media_type, json.dumps(cache_payload))
 
                 self.title_resolved.emit(full_title)
                 self.details_resolved.emit(details_payload)

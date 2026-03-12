@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from src.ui.dialogs.flow_details import FlowDetailsModal
 from src.ui.dialogs.delete_torrent import DeleteTorrentDialog
 from src.ui.conversion_flowchart import ConversionFlowViewer
-from src.core.image_downloader import ImageDownloaderThread
+from src.infrastructure.services.image_downloader import ImageDownloaderThread
 
 
 # -------------------------------------------------------------

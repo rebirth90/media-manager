@@ -1,10 +1,10 @@
 import os
 from PyQt6.QtCore import QObject
 from PyQt6.QtWebEngineCore import QWebEngineProfile
-from src.services.filelist_auth import FilelistAuthenticator
+from src.infrastructure.services.filelist_auth import FilelistAuthenticator
 from src.presentation.windows.main_dashboard import MainDashboard
 from src.infrastructure.repositories.sqlite_media_repository import SQLiteMediaRepository
-from src.core.media_controller import MediaController
+from src.application.media_controller import MediaController
 
 
 class AppController(QObject):

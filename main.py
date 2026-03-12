@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import QApplication
 # Allow absolute imports from the src package
 sys.path.insert(0, os.path.dirname(__file__))
 
-from src.services.api_server import run_server
-from src.core.app_controller import AppController
+from src.infrastructure.services.api_server import run_server
+from src.application.app_controller import AppController
 
 def main() -> None:
     load_dotenv()
