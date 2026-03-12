@@ -62,7 +62,7 @@ class MediaCardWidget(QFrame):
     def _setup_top_row(self):
         self.top_row_container = QWidget()
         self.top_row_container.setObjectName("TopRow")
-        self.top_row_container.setMinimumHeight(140)
+        self.top_row_container.setMinimumHeight(160)
         self.top_row_container.installEventFilter(self)
         self.top_row_container.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -71,7 +71,7 @@ class MediaCardWidget(QFrame):
         self.top_row_layout.setSpacing(20)
 
         self.lbl_poster = QLabel()
-        self.lbl_poster.setFixedSize(60, 85)
+        self.lbl_poster.setFixedSize(85, 128)
         self.lbl_poster.setObjectName("PosterImage")
         self.top_row_layout.addWidget(self.lbl_poster, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -91,6 +91,7 @@ class MediaCardWidget(QFrame):
         self.lbl_foldout_desc.setObjectName("DescText")
         self.lbl_foldout_desc.setWordWrap(True)
         self.lbl_foldout_desc.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.lbl_foldout_desc.setMinimumHeight(70)
         
         info_layout.addWidget(self.title_lbl)
         info_layout.addWidget(self.lbl_foldout_genre_rating)
@@ -183,7 +184,7 @@ class MediaCardWidget(QFrame):
         self.foldout_container.setVisible(False)
         self.foldout_container.setMaximumHeight(0) 
         self.foldout_layout = QVBoxLayout(self.foldout_container)
-        self.foldout_layout.setContentsMargins(10, 0, 10, 10)
+        self.foldout_layout.setContentsMargins(10, 0, 10, 0)
         
         self.flowchart_view = ConversionFlowViewer()
         self.foldout_layout.addWidget(self.flowchart_view)
@@ -208,9 +209,8 @@ class MediaCardWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            target_h = self.foldout_layout.sizeHint().height()
             self._foldout_anim.setStartValue(0)
-            self._foldout_anim.setEndValue(max(target_h, 550))
+            self._foldout_anim.setEndValue(self.flowchart_view.height() or 300)
             def on_open_finished(): self.foldout_container.setMaximumHeight(16777215)
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -424,7 +424,7 @@ class EpisodeRowWidget(QFrame):
         self.foldout_container.setVisible(False)
         self.foldout_container.setMaximumHeight(0) 
         self.foldout_layout = QVBoxLayout(self.foldout_container)
-        self.foldout_layout.setContentsMargins(10, 0, 10, 10)
+        self.foldout_layout.setContentsMargins(10, 0, 10, 0)
         
         self.flowchart_view = ConversionFlowViewer()
         self.foldout_layout.addWidget(self.flowchart_view)
@@ -451,9 +451,8 @@ class EpisodeRowWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            target_h = self.foldout_layout.sizeHint().height()
             self._foldout_anim.setStartValue(0)
-            self._foldout_anim.setEndValue(max(target_h, 550))
+            self._foldout_anim.setEndValue(self.flowchart_view.height() or 300)
             def on_open_finished(): self.foldout_container.setMaximumHeight(16777215)
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -599,7 +598,7 @@ class SeriesCardWidget(QWidget):
         
         self.top_row_container = QWidget()
         self.top_row_container.setObjectName("TopRow")
-        self.top_row_container.setMinimumHeight(140)
+        self.top_row_container.setMinimumHeight(160)
         self.top_row_container.setCursor(Qt.CursorShape.PointingHandCursor)
         self.top_row_container.installEventFilter(self)
         
@@ -608,7 +607,7 @@ class SeriesCardWidget(QWidget):
         top_layout.setSpacing(20)
 
         self.lbl_poster = QLabel()
-        self.lbl_poster.setFixedSize(60, 85)
+        self.lbl_poster.setFixedSize(85, 128)
         self.lbl_poster.setObjectName("PosterImage")
         top_layout.addWidget(self.lbl_poster, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -624,6 +623,7 @@ class SeriesCardWidget(QWidget):
         self.lbl_desc.setObjectName("DescText")
         self.lbl_desc.setWordWrap(True)
         self.lbl_desc.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.lbl_desc.setMinimumHeight(70)
         
         info_v.addWidget(self.title_lbl)
         info_v.addWidget(self.lbl_genre)

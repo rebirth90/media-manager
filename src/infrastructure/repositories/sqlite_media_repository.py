@@ -1,8 +1,11 @@
 import sqlite3
-import os
-from typing import List, Dict, Any
+from typing import List, Optional
 
-class LocalDBManager:
+from src.domain.repositories import IMediaRepository
+from src.domain.entities import MediaItem
+
+class SQLiteMediaRepository(IMediaRepository):
+    """Concrete implementation of IMediaRepository using SQLite."""
     def __init__(self, db_path: str = "local_data.db"):
         self.db_path = db_path
         self._init_db()
@@ -31,7 +34,7 @@ class LocalDBManager:
                 ("torrent_data", "TEXT"),
                 ("conversion_data", "TEXT"),
                 ("is_season", "INTEGER DEFAULT 0"),
-                ("media_type", "TEXT DEFAULT 'movie'") # 'movie' or 'tv-series'
+                ("media_type", "TEXT DEFAULT 'movie'")
             ]
             for col_name, col_type in columns:
                 try:
@@ -62,33 +65,49 @@ class LocalDBManager:
             ''')
             conn.commit()
 
-    def add_item(self, relative_path: str, image_url: str, title: str, season: str = "", is_season: int = 0, media_type: str = 'movie') -> int:
+    def _row_to_entity(self, row: sqlite3.Row) -> MediaItem:
+        return MediaItem(
+            id=row['id'],
+            relative_path=row['relative_path'],
+            image_url=row['image_url'],
+            title=row['title'],
+            season=row['season'],
+            description=row.keys() and 'description' in row.keys() and row['description'] or None,
+            genre=row.keys() and 'genre' in row.keys() and row['genre'] or None,
+            rating=row.keys() and 'rating' in row.keys() and row['rating'] or None,
+            torrent_data=row.keys() and 'torrent_data' in row.keys() and row['torrent_data'] or None,
+            conversion_data=row.keys() and 'conversion_data' in row.keys() and row['conversion_data'] or None,
+            is_season=row.keys() and 'is_season' in row.keys() and row['is_season'] or 0,
+            media_type=row.keys() and 'media_type' in row.keys() and row['media_type'] or 'movie'
+        )
+
+    def add_item(self, item: MediaItem) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO media_items (relative_path, image_url, title, season, is_season, media_type)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (relative_path, image_url, title, season, is_season, media_type))
+            ''', (item.relative_path, item.image_url, item.title, item.season, item.is_season, item.media_type))
             conn.commit()
             return cursor.lastrowid
 
-    def get_all_items(self) -> List[Dict[str, Any]]:
+    def get_all_items(self) -> List[MediaItem]:
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM media_items')
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [self._row_to_entity(row) for row in rows]
 
-    def get_item(self, item_id: int) -> Dict[str, Any]:
+    def get_item(self, item_id: int) -> Optional[MediaItem]:
         if item_id is None:
-            return {}
+            return None
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM media_items WHERE id = ?', (item_id,))
             row = cursor.fetchone()
-            return dict(row) if row else {}
+            return self._row_to_entity(row) if row else None
 
     def delete_item(self, item_id: int) -> bool:
         if item_id is None:
@@ -108,26 +127,38 @@ class LocalDBManager:
             cursor.execute('UPDATE media_items SET title = ? WHERE id = ?', (title, item_id))
             conn.commit()
 
-    # --- APP STATE WRITING METHODS ---
-    def update_metadata(self, item_id: int, description: str, genre: str, rating: str):
-        if item_id is None: return
+    def update_item_image_url(self, item_id: int, image_url: str) -> None:
+        if item_id is None:
+            return
         with self._get_connection() as conn:
-            conn.cursor().execute('UPDATE media_items SET description=?, genre=?, rating=? WHERE id=?', (description, genre, rating, item_id))
+            cursor = conn.cursor()
+            cursor.execute('UPDATE media_items SET image_url = ? WHERE id = ?', (image_url, item_id))
             conn.commit()
 
-    def update_torrent_data(self, item_id: int, data: str):
-        if item_id is None: return
+    def update_metadata(self, item_id: int, description: str, genre: str, rating: str) -> None:
+        if item_id is None:
+            return
         with self._get_connection() as conn:
-            conn.cursor().execute('UPDATE media_items SET torrent_data=? WHERE id=?', (data, item_id))
+            cursor = conn.cursor()
+            cursor.execute('UPDATE media_items SET description=?, genre=?, rating=? WHERE id=?', (description, genre, rating, item_id))
             conn.commit()
 
-    def update_conversion_data(self, item_id: int, data: str):
-        if item_id is None: return
+    def update_torrent_data(self, item_id: int, data: str) -> None:
+        if item_id is None:
+            return
         with self._get_connection() as conn:
-            conn.cursor().execute('UPDATE media_items SET conversion_data=? WHERE id=?', (data, item_id))
+            cursor = conn.cursor()
+            cursor.execute('UPDATE media_items SET torrent_data=? WHERE id=?', (data, item_id))
             conn.commit()
 
-    # --- Caching Methods ---
+    def update_conversion_data(self, item_id: int, data: str) -> None:
+        if item_id is None:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE media_items SET conversion_data=? WHERE id=?', (data, item_id))
+            conn.commit()
+
     def get_tmdb_cache(self, tmdb_id: str, media_type: str) -> str:
         with self._get_connection() as conn:
             cursor = conn.cursor()

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Manager Pipeline</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;800&display=swap"
+    rel="stylesheet">
+  <style>/* INJECT_CSS */</style>
+</head>
+
+<body>
+  <div id="page">
+    <svg id="arrows-svg">
+      <defs>
+        <marker id="m-teal" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(45,212,191,.9)" />
+        </marker>
+        <marker id="m-red" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(244,63,94,.9)" />
+        </marker>
+        <marker id="m-yellow" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(251,191,36,.9)" />
+        </marker>
+        <marker id="m-purple" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(192,132,252,.9)" />
+        </marker>
+        <marker id="m-blue" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(59,130,246,.9)" />
+        </marker>
+        <marker id="m-green" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0,7 3,0 6" fill="rgba(74,222,128,.9)" />
+        </marker>
+      </defs>
+    </svg>
+
+    <div class="tl-outer">
+      <div class="tl-track" id="track">
+        <div class="spine"></div>
+
+        <div class="phase-col col-teal" id="col-1">
+          <div class="phase-node"><span class="ph-icon">📥</span><span class="ph-num">01</span><span
+              class="ph-lbl">Ingest</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p1-input">
+                <div class="sc-title"><span class="sc-dot"></span>User Input</div>
+                <div class="sc-body">Add media path to <span class="code">conversion.txt</span></div>
+              </div>
+              <div class="sc teal" id="p1-queue">
+                <div class="sc-title"><span class="sc-dot"></span>Queue Management</div>
+                <div class="sc-body">DatabaseManager reads file<br>Adds to SQLite as <span class="code">PENDING</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-1-2"></div>
+
+        <div class="phase-col col-teal" id="col-2">
+          <div class="phase-node"><span class="ph-icon">⚙️</span><span class="ph-num">02</span><span
+              class="ph-lbl">Worker</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p2-dequeue">
+                <div class="sc-title"><span class="sc-dot"></span>Job Dequeue</div>
+                <div class="sc-body"><span class="code">PENDING</span> → <span class="code">PROCESSING</span></div>
+              </div>
+              <div class="sc teal" id="p2-pass">
+                <div class="sc-title"><span class="sc-dot"></span>Path Validation — PASS</div>
+                <div class="sc-body">Path accepted, proceed</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-2-3"></div>
+
+        <div class="phase-col col-yellow" id="col-3">
+          <div class="phase-node"><span class="ph-icon">🔀</span><span class="ph-num">03</span><span
+              class="ph-lbl">Type</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc yellow" id="p3-router">
+                <div class="sc-title"><span class="sc-dot"></span>Media Type Router</div>
+                <div class="sc-body">Analyse base path</div>
+              </div>
+              <div class="branch-row">
+                <div class="sc blue" id="p3-movie">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>MOVIE
+                  </div>
+                  <div class="sc-body"><span class="code">movies_root</span></div>
+                </div>
+                <div class="sc yellow" id="p3-tv">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>TV</div>
+                  <div class="sc-body"><span class="code">tv_root</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-3-4"></div>
+
+        <div class="phase-col col-purple" id="col-4">
+          <div class="phase-node"><span class="ph-icon">🏭</span><span class="ph-num">04</span><span
+              class="ph-lbl">Factory</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc blue" id="p4-movie">
+                <div class="sc-title"><span class="sc-dot"></span>Movie Processing</div>
+                <div class="sc-body">Dir → largest file → Movie object<br>File → single Movie object
+                </div>
+              </div>
+              <div class="sc yellow" id="p4-tv">
+                <div class="sc-title"><span class="sc-dot"></span>TV Series Processing</div>
+                <div class="sc-body">Dir → scan <span class="code">.mkv .mp4</span><br>→ TVEpisode
+                  objects</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-4-5"></div>
+
+        <div class="phase-col col-yellow" id="col-5">
+          <div class="phase-node"><span class="ph-icon">🔍</span><span class="ph-num">05</span><span
+              class="ph-lbl">Check</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc yellow" id="p5-check">
+                <div class="sc-title"><span class="sc-dot"></span>MP4 Existence Check</div>
+                <div class="sc-body">Does target <span class="code">.mp4</span> exist?</div>
+              </div>
+              <div class="sc red" id="p5-fail">
+                <div class="sc-title"><span class="sc-dot"></span>EXISTS → Fast Fail</div>
+                <div class="sc-body">Skip encode · clean source<br>Mark <span class="code">COMPLETE</span></div>
+              </div>
+              <div class="sc teal" id="p5-pass">
+                <div class="sc-title"><span class="sc-dot"></span>NOT EXISTS → Continue</div>
+                <div class="sc-body">Proceed to pipeline</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-5-6"></div>
+
+        <div class="phase-col col-purple" id="col-6">
+          <div class="phase-node"><span class="ph-icon">💬</span><span class="ph-num">06</span><span
+              class="ph-lbl">Subs</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc purple" id="p6-discovery">
+                <div class="sc-title"><span class="sc-dot"></span>Subtitle Discovery</div>
+                <div class="sc-body">Find external OR extract embedded</div>
+              </div>
+              <div class="sc purple" id="p6-vobsub">
+                <div class="sc-title"><span class="sc-dot"></span>Binary VobSub</div>
+                <div class="sc-body"><span class="code">.idx</span> / MPEG-PS header<br>Keep <span
+                    class="code">.sub/.idx</span></div>
+              </div>
+              <div class="sc purple" id="p6-text">
+                <div class="sc-title"><span class="sc-dot"></span>Text Subtitles</div>
+                <div class="sc-body"><span class="code">.srt .ass</span> MicroDVD<br>Force UTF-8 · RO
+                  char rules</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-6-7"></div>
+
+        <div class="phase-col col-teal" id="col-7">
+          <div class="phase-node"><span class="ph-icon">🎞️</span><span class="ph-num">07</span><span
+              class="ph-lbl">Encode</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p7-heuristics">
+                <div class="sc-title"><span class="sc-dot"></span>Heuristics Check</div>
+                <div class="sc-body">Query DB for last successful params</div>
+              </div>
+              <div class="sc purple" id="p7-audio">
+                <div class="sc-title"><span class="sc-dot"></span>Audio Processing</div>
+                <div class="sc-body">5.1/7.1 → 256k · Stereo → 192k</div>
+              </div>
+              <div class="sc purple" id="p7-tiers">
+                <div class="sc-title"><span class="sc-dot"></span>Tiered Fallback Loop</div>
+                <div class="sc-body">
+                  Tier 1: <span class="code">bf=7 lad=40 async=8</span><br>
+                  Tier 2: <span class="code">bf=4 lad=20 async=4</span><br>
+                  Tier 3: <span class="code">bf=0 lad=10 async=2</span>
+                </div>
+              </div>
+              <div class="sc yellow" id="p7-outcome">
+                <div class="sc-title"><span class="sc-dot"></span>Outcome Handler</div>
+                <div class="sc-body"><span style="color:var(--green)">Success</span> → save to
+                  DB<br><span style="color:var(--red)">Failure</span> → del temp · next tier</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-gap" id="gap-7-8"></div>
+
+        <div class="phase-col col-teal" id="col-8">
+          <div class="phase-node"><span class="ph-icon">✅</span><span class="ph-num">08</span><span
+              class="ph-lbl">Final</span></div>
+          <div class="node-to-panel"></div>
+          <div class="phase-panel">
+            <div class="panel-body">
+              <div class="sc teal" id="p8-relocate">
+                <div class="sc-title"><span class="sc-dot"></span>File Relocation</div>
+                <div class="sc-body">Move encoded <span class="code">.mp4</span> + subtitles</div>
+              </div>
+              <div class="branch-row">
+                <div class="sc blue" id="p8-movie">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>Movies
+                  </div>
+                  <div class="sc-body"><span class="code">/archive/movies/</span></div>
+                </div>
+                <div class="sc yellow" id="p8-tv">
+                  <div class="sc-title" style="font-size:.67rem"><span class="sc-dot"></span>TV</div>
+                  <div class="sc-body"><span class="code">/archive/tv/</span></div>
+                </div>
+              </div>
+              <div class="sc teal" id="p8-cleanup">
+                <div class="sc-title"><span class="sc-dot"></span>Source Cleanup</div>
+                <div class="sc-body">Delete original · remove empty dirs</div>
+              </div>
+              <div class="sc teal" id="p8-complete">
+                <div class="sc-title"><span class="sc-dot"></span>✓ Job Complete</div>
+                <div class="sc-body">Status: <span class="code">COMPLETED</span><br>Log metrics</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <script>
+/* INJECT_JS */
+</script>
+</body>
+
+</html>

@@ -1,0 +1,7 @@
+PyQt6>=6.4.0
+PyQt6-WebEngine>=6.4.0
+qbittorrent-api>=2023.11.57
+python-dotenv>=1.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+paramiko>=3.3.1

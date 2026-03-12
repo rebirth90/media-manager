@@ -5,7 +5,7 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QFrame, QScrollArea, QLayout, QSizePolicy, QGraphicsOpacityEffect)
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QPolygonF
-from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSize
+from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSize, pyqtSignal
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 
@@ -225,6 +225,8 @@ def make_tier_box(children, light=False):
     return w
 
 class ConversionFlowViewer(QWidget):
+    height_calculated = pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
@@ -233,6 +235,8 @@ class ConversionFlowViewer(QWidget):
         self._view = QWebEngineView()
         self._page_loaded = False
         self._pending_json = None
+        
+        self._view.titleChanged.connect(self._on_title_changed)
 
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
         settings = self._view.settings()
@@ -240,12 +244,14 @@ class ConversionFlowViewer(QWidget):
         settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, False)
 
-        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._view.setFixedHeight(300)
         self._view.loadFinished.connect(self._on_load_finished)
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        html_path = os.path.join(base_dir, "assets", "conversion_pipeline.html")
-        self._view.load(QUrl.fromLocalFile(html_path))
+        from src.presentation.widgets.pipeline_asset_builder import PipelineAssetBuilder
+        builder = PipelineAssetBuilder()
+        html_content = builder.build_html("{}")
+        self._view.setHtml(html_content)
         lay.addWidget(self._view)
 
         self.opacity_effect = QGraphicsOpacityEffect(self._view)
@@ -257,6 +263,17 @@ class ConversionFlowViewer(QWidget):
         self.fade_anim.setStartValue(0.0)
         self.fade_anim.setEndValue(1.0)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
+    def _on_title_changed(self, title: str):
+        if title.startswith("PIPELINE_HEIGHT:"):
+            try:
+                h = int(title.split(":")[1])
+                print(f"[DEBUG FlowViewer] JS reported height: {h}")
+                self._view.setFixedHeight(h)
+                self.setFixedHeight(h)
+                self.height_calculated.emit(h)
+            except Exception:
+                pass
 
     def _on_load_finished(self, ok):
         if ok:

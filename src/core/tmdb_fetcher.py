@@ -13,10 +13,10 @@ class TMDBFetcherThread(QThread):
         self.media_type = media_type
 
     def run(self) -> None:
-        from src.models.local_db import LocalDBManager
+        from src.infrastructure.repositories.sqlite_media_repository import SQLiteMediaRepository
         import json
         
-        db = LocalDBManager()
+        db = SQLiteMediaRepository()
         cached = db.get_tmdb_cache(self.tmdb_id, self.media_type)
         if cached:
             try:

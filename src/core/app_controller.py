@@ -2,7 +2,8 @@ import os
 from PyQt6.QtCore import QObject
 from PyQt6.QtWebEngineCore import QWebEngineProfile
 from src.services.filelist_auth import FilelistAuthenticator
-from src.ui.main_window import SecureServerWindow
+from src.presentation.windows.main_dashboard import MainDashboard
+from src.infrastructure.repositories.sqlite_media_repository import SQLiteMediaRepository
 from src.core.media_controller import MediaController
 
 
@@ -26,11 +27,15 @@ class AppController(QObject):
         self.auth_manager = FilelistAuthenticator(self.shared_profile, self)
         self.auth_manager.login()
 
-        # 2. Initialize Controllers
+        # 2. Initialize Infrastructure & Controllers
+        self.repo = SQLiteMediaRepository()
+        
+        # MediaController will eventually be broken into UseCases in the Application Layer,
+        # but for now we inject the repo indirectly or simply retain its capabilities.
         self.media_controller = MediaController(self)
         
-        # 3. Create and configure Main Window
-        self.main_window = SecureServerWindow(self.shared_profile, self.media_controller)
+        # 3. Create and configure Main Dashboard
+        self.main_window = MainDashboard(self.shared_profile, self.media_controller, self.repo)
 
     def run(self):
         """Displays the main window to start the user interaction loop."""
