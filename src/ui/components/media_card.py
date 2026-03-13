@@ -202,23 +202,30 @@ class MediaCardWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(280)
-            self._foldout_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._foldout_anim.setDuration(400)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
 
         self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
+
+        parent = self.parentWidget()
+        if parent: parent.setUpdatesEnabled(False)
 
         if is_opening:
             self.foldout_container.setVisible(True)
             target_h = self.foldout_container.sizeHint().height() or 550
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
-            def on_open_finished(): self.foldout_container.setMaximumHeight(16777215)
+            def on_open_finished(): 
+                self.foldout_container.setMaximumHeight(16777215)
+                if parent: parent.setUpdatesEnabled(True)
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
         else:
-            def on_close_finished(): self.foldout_container.setVisible(False)
+            def on_close_finished(): 
+                self.foldout_container.setVisible(False)
+                if parent: parent.setUpdatesEnabled(True)
             self._foldout_anim.finished.connect(on_close_finished)
             self._foldout_anim.setStartValue(self.foldout_container.height())
             self._foldout_anim.setEndValue(0)
@@ -446,23 +453,30 @@ class EpisodeRowWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(280)
-            self._foldout_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._foldout_anim.setDuration(400)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
 
         self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
+
+        parent = self.parentWidget()
+        if parent: parent.setUpdatesEnabled(False)
 
         if is_opening:
             self.foldout_container.setVisible(True)
             target_h = self.foldout_container.sizeHint().height() or 550
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
-            def on_open_finished(): self.foldout_container.setMaximumHeight(16777215)
+            def on_open_finished(): 
+                self.foldout_container.setMaximumHeight(16777215)
+                if parent: parent.setUpdatesEnabled(True)
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
         else:
-            def on_close_finished(): self.foldout_container.setVisible(False)
+            def on_close_finished(): 
+                self.foldout_container.setVisible(False)
+                if parent: parent.setUpdatesEnabled(True)
             self._foldout_anim.finished.connect(on_close_finished)
             self._foldout_anim.setStartValue(self.foldout_container.height())
             self._foldout_anim.setEndValue(0)
@@ -744,12 +758,16 @@ class SeriesCardWidget(QWidget):
         
         if not hasattr(self, '_ep_anim'):
             self._ep_anim = QPropertyAnimation(self.episodes_container, b"maximumHeight", self)
-            self._ep_anim.setDuration(280)
-            self._ep_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._ep_anim.setDuration(400)
+            self._ep_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
         
         self._ep_anim.stop()
         try: self._ep_anim.finished.disconnect()
         except TypeError: pass
+        
+        # Performance: Disable updates on the scroll content to prevent jitter
+        parent = self.parentWidget()
+        if parent: parent.setUpdatesEnabled(False)
         
         if self._expanded:
             self.episodes_container.setVisible(True)
@@ -757,12 +775,16 @@ class SeriesCardWidget(QWidget):
             target_h = self.episodes_container.sizeHint().height() or 400
             self._ep_anim.setStartValue(0)
             self._ep_anim.setEndValue(target_h)
-            def on_ep_open(): self.episodes_container.setMaximumHeight(16777215)
+            def on_ep_open(): 
+                self.episodes_container.setMaximumHeight(16777215)
+                if parent: parent.setUpdatesEnabled(True)
             self._ep_anim.finished.connect(on_ep_open)
             self._ep_anim.start()
         else:
             self.btn_expand.setIcon(QIcon(os.path.join(base_dir, "assets", "chevron_down.svg")))
-            def on_ep_close(): self.episodes_container.setVisible(False)
+            def on_ep_close(): 
+                self.episodes_container.setVisible(False)
+                if parent: parent.setUpdatesEnabled(True)
             self._ep_anim.finished.connect(on_ep_close)
             self._ep_anim.setStartValue(self.episodes_container.height())
             self._ep_anim.setEndValue(0)
@@ -833,6 +855,9 @@ class SeriesCardWidget(QWidget):
         if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
         ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
         
+        if ep_num is None:
+            return None
+        
         display_title = os.path.basename(rel_path)
         desc = "No description available."
         still_url = ""
@@ -870,8 +895,7 @@ class SeriesCardWidget(QWidget):
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
-        
-        total_completed = 0
+        total_percentage_sum = 0
         active_status_text = "Not Started"
         
         for ep_data in episodes_data:
@@ -885,30 +909,34 @@ class SeriesCardWidget(QWidget):
                     if os.path.basename(qbit_path) == fname:
                         row = widget
                         break
-                        
+            
             if not row:
                 row = self._ensure_episode_row(path, getattr(self, '_cached_tmdb_eps', None))
             
+            # Guard clause: if row is still None after trying to ensure it, skip this episode
+            if not row:
+                continue
+
             from src.ui.components.progress_pill import calculate_conversion_progress
             state_text, ep_prog = calculate_conversion_progress(ep_data)
+            total_percentage_sum += ep_prog
             
             if row:
                 row.update_status(ep_data)
 
-            if ep_prog == 100 or state_text == "Completed":
-                total_completed += 1
-            elif ep_prog > 0 and active_status_text == "Not Started":
-                ep_badge = row.badge.text() if row else "EP?"
-                active_status_text = f"{ep_badge} - {state_text}"
+            if 0 < ep_prog < 100 and active_status_text == "Not Started":
+                ep_num = row.ep_num if row else None
+                active_status_text = f"EP{ep_num} - {state_text}" if ep_num else state_text
 
-        total_eps = len(self.episodes_map) if self.episodes_map else len(episodes_data)
-        if total_eps == 0: total_eps = 1
-
-        aggregate_progress = int((total_completed / total_eps) * 100)
+        total_eps = len(episodes_data) if episodes_data else 1
+        aggregate_progress = int(total_percentage_sum / total_eps)
         
-        if total_completed == total_eps: final_status = "Completed"
-        elif aggregate_progress > 0 or active_status_text != "Not Started": final_status = active_status_text
-        else: final_status = "Not Started"
+        if all(calculate_conversion_progress(ed)[1] == 100 for ed in episodes_data):
+            final_status = "Completed"
+        elif active_status_text != "Not Started":
+            final_status = active_status_text
+        else:
+            final_status = "Not Started"
             
         pill_css = "PillUnknown"
         if final_status == "Completed": pill_css = "PillSuccess"

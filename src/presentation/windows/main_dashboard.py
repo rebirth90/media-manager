@@ -1,6 +1,8 @@
 import os
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QDialog, QApplication
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QDialog, QApplication, QLabel, QGraphicsOpacityEffect
+)
 
 from src.presentation.widgets.header_navigation import HeaderNavigationWidget
 from src.presentation.widgets.media_grid import MediaGridWidget
@@ -10,6 +12,19 @@ from src.ui.dialogs.browser_modal import BrowserModalDialog
 from src.ui.dialogs.media_category import MediaCategoryDialog
 from src.application.media_controller import parse_tv_title
 from src.application.use_cases.media_use_cases import AddMediaUseCase
+from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+
+class LoadingOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("LoadingOverlay")
+        self.setStyleSheet("background-color: #0A0B0E;")
+        layout = QVBoxLayout(self)
+        self.label = QLabel("Initializing Media Ecosystem...")
+        self.label.setStyleSheet("color: #60A5FA; font-size: 18px; font-weight: bold;")
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.label)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
 class MainDashboard(QMainWindow):
     """
@@ -56,6 +71,11 @@ class MainDashboard(QMainWindow):
         self.main_layout.addWidget(self.header_nav)
         self.main_layout.addWidget(self.media_grid)
         
+        # Requirement 3: Startup Overlay
+        self.loading_overlay = LoadingOverlay(self.central_w)
+        self.loading_overlay.setGeometry(self.rect())
+        self.loading_overlay.raise_()
+        
         self.setCentralWidget(self.central_w)
         
         # Wire up TMDB resolution signals
@@ -86,7 +106,28 @@ class MainDashboard(QMainWindow):
                 season=item.season
             )
             
-        self.media_grid.filter_items("", "Movies")
+        # Non-blocking filter to prevent initial hang
+        QTimer.singleShot(0, lambda: self.media_grid.filter_items("", "Movies"))
+        
+        # Fade out overlay after initial render
+        QTimer.singleShot(500, self._fade_out_overlay)
+
+    def _fade_out_overlay(self):
+        self.effect = QGraphicsOpacityEffect(self.loading_overlay)
+        self.loading_overlay.setGraphicsEffect(self.effect)
+        
+        self.anim = QPropertyAnimation(self.effect, b"opacity")
+        self.anim.setDuration(800)
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.finished.connect(self.loading_overlay.deleteLater)
+        self.anim.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'loading_overlay') and self.loading_overlay:
+            self.loading_overlay.setGeometry(self.central_w.rect())
 
     def _spawn_browser_modal(self) -> None:
         if self._modal_open: return

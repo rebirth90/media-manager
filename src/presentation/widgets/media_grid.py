@@ -209,44 +209,21 @@ class MediaGridWidget(QWidget):
             return
         self._last_filter_key = filter_key
 
-        # If an animation is already running, finish it instantly
-        if self._filter_anim and self._filter_anim.state() == QSequentialAnimationGroup.State.Running:
-            self._filter_anim.stop()
-        if self.scroll_content.graphicsEffect():
-            self.scroll_content.setGraphicsEffect(None)
-
         q = query.lower().strip()
 
-        def _apply_visibility():
-            for flow in self.all_flows:
-                title = flow.title_lbl.text().lower()
-                matches_search = not q or q in title
-                matches_category = (category == "TV Series" and getattr(flow, 'media_type', 'movie') == 'tv-series') or \
-                                   (category == "Movies" and getattr(flow, 'media_type', 'movie') == 'movie')
-                flow.setVisible(matches_search and matches_category)
+        # Instant Visibility Toggle (Lazy Update)
+        for flow in self.all_flows:
+            title = flow.title_lbl.text().lower()
+            matches_search = not q or q in title
+            matches_category = (category == "TV Series" and getattr(flow, 'media_type', 'movie') == 'tv-series') or \
+                               (category == "Movies" and getattr(flow, 'media_type', 'movie') == 'movie')
+            
+            should_be_visible = matches_search and matches_category
+            if flow.isVisible() != should_be_visible:
+                # Disable layout updates temporarily to prevent massive recalculations
+                self.scroll_content.setUpdatesEnabled(False)
+                flow.setVisible(should_be_visible)
 
-        # Crossfade: fade out → update → fade in
-        seq = QSequentialAnimationGroup(self)
-        self._filter_anim = seq
-
-        effect = QGraphicsOpacityEffect(self.scroll_content)
-        effect.setOpacity(1.0)
-        self.scroll_content.setGraphicsEffect(effect)
-
-        fade_out = QPropertyAnimation(effect, b"opacity", self)
-        fade_out.setDuration(120)
-        fade_out.setStartValue(1.0)
-        fade_out.setEndValue(0.0)
-        fade_out.setEasingCurve(QEasingCurve.Type.OutCubic)
-        fade_out.finished.connect(_apply_visibility)
-
-        fade_in = QPropertyAnimation(effect, b"opacity", self)
-        fade_in.setDuration(150)
-        fade_in.setStartValue(0.0)
-        fade_in.setEndValue(1.0)
-        fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        seq.addAnimation(fade_out)
-        seq.addAnimation(fade_in)
-        seq.finished.connect(lambda: self.scroll_content.setGraphicsEffect(None))
-        seq.start()
+        # Defer layout recalculation until next event loop tick to prevent UI hang
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self.scroll_content.setUpdatesEnabled(True))
