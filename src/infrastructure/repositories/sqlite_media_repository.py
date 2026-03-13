@@ -34,7 +34,8 @@ class SQLiteMediaRepository(IMediaRepository):
                 ("torrent_data", "TEXT"),
                 ("conversion_data", "TEXT"),
                 ("is_season", "INTEGER DEFAULT 0"),
-                ("media_type", "TEXT DEFAULT 'movie'")
+                ("media_type", "TEXT DEFAULT 'movie'"),
+                ("tmdb_id", "TEXT")
             ]
             for col_name, col_type in columns:
                 try:
@@ -78,16 +79,17 @@ class SQLiteMediaRepository(IMediaRepository):
             torrent_data=row.keys() and 'torrent_data' in row.keys() and row['torrent_data'] or None,
             conversion_data=row.keys() and 'conversion_data' in row.keys() and row['conversion_data'] or None,
             is_season=row.keys() and 'is_season' in row.keys() and row['is_season'] or 0,
-            media_type=row.keys() and 'media_type' in row.keys() and row['media_type'] or 'movie'
+            media_type=row.keys() and 'media_type' in row.keys() and row['media_type'] or 'movie',
+            tmdb_id=row.keys() and 'tmdb_id' in row.keys() and row['tmdb_id'] or None
         )
 
     def add_item(self, item: MediaItem) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO media_items (relative_path, image_url, title, season, is_season, media_type)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (item.relative_path, item.image_url, item.title, item.season, item.is_season, item.media_type))
+                INSERT INTO media_items (relative_path, image_url, title, season, is_season, media_type, tmdb_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (item.relative_path, item.image_url, item.title, item.season, item.is_season, item.media_type, item.tmdb_id))
             conn.commit()
             return cursor.lastrowid
 
@@ -135,6 +137,17 @@ class SQLiteMediaRepository(IMediaRepository):
             cursor.execute('UPDATE media_items SET image_url = ? WHERE id = ?', (image_url, item_id))
             conn.commit()
 
+    def update_tmdb_id(self, item_id: int, tmdb_id: str) -> None:
+        if item_id is None:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('UPDATE media_items SET tmdb_id = ? WHERE id = ?', (tmdb_id, item_id))
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+
     def update_metadata(self, item_id: int, description: str, genre: str, rating: str) -> None:
         if item_id is None:
             return
@@ -165,6 +178,15 @@ class SQLiteMediaRepository(IMediaRepository):
             cursor.execute('SELECT data FROM tmdb_cache WHERE id = ? AND type = ?', (tmdb_id, media_type))
             row = cursor.fetchone()
             return row[0] if row else ""
+
+    def recover_tmdb_id_by_title(self, title: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Searching inside the JSON payload using LIKE wildcard for "full_title" key
+            search_str = f'%"full_title": "{title}"%'
+            cursor.execute('SELECT id FROM tmdb_cache WHERE data LIKE ? LIMIT 1', (search_str,))
+            row = cursor.fetchone()
+            return row[0] if row else None
 
     def set_tmdb_cache(self, tmdb_id: str, media_type: str, data: str) -> None:
         with self._get_connection() as conn:

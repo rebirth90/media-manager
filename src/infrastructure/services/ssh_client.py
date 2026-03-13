@@ -58,7 +58,12 @@ try:
     rows = cur.fetchall()
     
     if not rows:
-        words = [w for w in re.split(r'\\W+', target_title) if len(w) > 2 and w.lower() not in ('season', 'episode')]
+        # Improved keyword extraction: exclude years and common metadata words
+        words = [w for w in re.split(r'\\W+', target_title) if len(w) > 2]
+        words = [w for w in words if w.lower() not in ('season', 'episode')]
+        # Filter out 4-digit years (e.g., 2008)
+        words = [w for w in words if not (w.isdigit() and len(w) == 4)]
+        
         if words:
             query = "SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE " + " AND ".join(["path LIKE ?"] * len(words)) + " ORDER BY id DESC"
             cur.execute(query, ['%' + w + '%' for w in words])

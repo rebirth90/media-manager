@@ -1,10 +1,11 @@
 import os
 import re
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QSequentialAnimationGroup, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QColor, QPen
 from PyQt6.QtCore import QRectF, QSize
 from PyQt6.QtWidgets import (
-    QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QSizePolicy, QDialog
+    QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QSizePolicy, QDialog,
+    QGraphicsOpacityEffect
 )
 
 from src.ui.dialogs.flow_details import FlowDetailsModal
@@ -201,16 +202,18 @@ class MediaCardWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(220)
-            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+            self._foldout_anim.setDuration(280)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
+        self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
 
         if is_opening:
             self.foldout_container.setVisible(True)
+            target_h = self.foldout_container.sizeHint().height() or 550
             self._foldout_anim.setStartValue(0)
-            self._foldout_anim.setEndValue(self.flowchart_view.height() or 300)
+            self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): self.foldout_container.setMaximumHeight(16777215)
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -443,16 +446,18 @@ class EpisodeRowWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(220)
-            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+            self._foldout_anim.setDuration(280)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
+        self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
 
         if is_opening:
             self.foldout_container.setVisible(True)
+            target_h = self.foldout_container.sizeHint().height() or 550
             self._foldout_anim.setStartValue(0)
-            self._foldout_anim.setEndValue(self.flowchart_view.height() or 300)
+            self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): self.foldout_container.setMaximumHeight(16777215)
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -535,7 +540,7 @@ class EpisodeRowWidget(QFrame):
         else:
             stage_flags = stage_flags_raw.copy() if stage_flags_raw else {}
             
-        db_status = ep_data.get("db_status", "").upper()
+        db_status = (ep_data.get("db_status") or ep_data.get("status") or "").upper()
         if db_status == "COMPLETED":
             stage_flags["p8-complete"] = True
             if not any(k.startswith("p3-") for k in stage_flags):
@@ -659,6 +664,14 @@ class SeriesCardWidget(QWidget):
         pr_v.addWidget(self.prog_bar_dl)
         status_layout.addWidget(pr_container)
 
+        sp_container, sp_v = create_status_column("Torrent DL speed", 110)
+        self.lbl_speed_display = QLabel("-")
+        self.lbl_speed_display.setFixedHeight(24)
+        self.lbl_speed_display.setObjectName("SizeText")
+        self.lbl_speed_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sp_v.addWidget(self.lbl_speed_display)
+        status_layout.addWidget(sp_container)
+
         cs_container, cs_v = create_status_column("Season Status", 150)
         self.lbl_conv_status = QLabel("Not Started")
         self.lbl_conv_status.setFixedHeight(24)
@@ -712,6 +725,7 @@ class SeriesCardWidget(QWidget):
         self.episodes_layout.setSpacing(6)
         
         self.episodes_container.setVisible(False)
+        self.episodes_container.setMaximumHeight(0)
         self.main_layout.addWidget(self.episodes_container)
 
     def eventFilter(self, obj, event):
@@ -728,12 +742,31 @@ class SeriesCardWidget(QWidget):
         self._expanded = not self._expanded
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         
+        if not hasattr(self, '_ep_anim'):
+            self._ep_anim = QPropertyAnimation(self.episodes_container, b"maximumHeight", self)
+            self._ep_anim.setDuration(280)
+            self._ep_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        self._ep_anim.stop()
+        try: self._ep_anim.finished.disconnect()
+        except TypeError: pass
+        
         if self._expanded:
             self.episodes_container.setVisible(True)
             self.btn_expand.setIcon(QIcon(os.path.join(base_dir, "assets", "chevron_up.svg")))
+            target_h = self.episodes_container.sizeHint().height() or 400
+            self._ep_anim.setStartValue(0)
+            self._ep_anim.setEndValue(target_h)
+            def on_ep_open(): self.episodes_container.setMaximumHeight(16777215)
+            self._ep_anim.finished.connect(on_ep_open)
+            self._ep_anim.start()
         else:
-            self.episodes_container.setVisible(False)
             self.btn_expand.setIcon(QIcon(os.path.join(base_dir, "assets", "chevron_down.svg")))
+            def on_ep_close(): self.episodes_container.setVisible(False)
+            self._ep_anim.finished.connect(on_ep_close)
+            self._ep_anim.setStartValue(self.episodes_container.height())
+            self._ep_anim.setEndValue(0)
+            self._ep_anim.start()
 
     def update_metadata(self, title, desc, genre, rating):
         display_title = title
@@ -773,6 +806,7 @@ class SeriesCardWidget(QWidget):
         self.prog_bar_dl.style().polish(self.prog_bar_dl)
             
         self.lbl_size_val.setText(size_str)
+        self.lbl_speed_display.setText(speed_str)
         self.prog_bar_dl.setValue(int(prog_val * 100))
 
     def _ensure_episode_row(self, rel_path: str, tmdb_episodes: dict = None):
@@ -782,15 +816,17 @@ class SeriesCardWidget(QWidget):
             if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
             ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
             
-            if ep_num and tmdb_episodes and ep_num in tmdb_episodes:
-                ep_vote = tmdb_episodes[ep_num].get('vote_average', '-')
-                ep_rating_str = str(round(float(ep_vote), 1)) if ep_vote and ep_vote != '-' else '-'
-                row.update_tmdb_data(
-                    tmdb_episodes[ep_num].get('name'), 
-                    tmdb_episodes[ep_num].get('overview'),
-                    tmdb_episodes[ep_num].get('still_url', ''),
-                    rating=ep_rating_str
-                )
+            if ep_num and tmdb_episodes:
+                ep_data = tmdb_episodes.get(ep_num) or tmdb_episodes.get(str(ep_num))
+                if ep_data:
+                    ep_vote = ep_data.get('vote_average', '-')
+                    ep_rating_str = str(round(float(ep_vote), 1)) if ep_vote and ep_vote != '-' else '-'
+                    row.update_tmdb_data(
+                        ep_data.get('name'), 
+                        ep_data.get('overview'),
+                        ep_data.get('still_url', ''),
+                        rating=ep_rating_str
+                    )
             return row
             
         match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', rel_path)
@@ -802,13 +838,15 @@ class SeriesCardWidget(QWidget):
         still_url = ""
         
         ep_rating = "-"
-        if tmdb_episodes and ep_num in tmdb_episodes:
-            display_title = tmdb_episodes[ep_num].get('name', display_title)
-            desc = tmdb_episodes[ep_num].get('overview', desc)
-            still_url = tmdb_episodes[ep_num].get('still_url', "")
-            ep_rating = tmdb_episodes[ep_num].get('vote_average', '-')
-            if ep_rating and ep_rating != '-':
-                ep_rating = str(round(float(ep_rating), 1))
+        if tmdb_episodes and ep_num:
+            ep_data = tmdb_episodes.get(ep_num) or tmdb_episodes.get(str(ep_num))
+            if ep_data:
+                display_title = ep_data.get('name', display_title)
+                desc = ep_data.get('overview', desc)
+                still_url = ep_data.get('still_url', "")
+                ep_rating = ep_data.get('vote_average', '-')
+                if ep_rating and ep_rating != '-':
+                    ep_rating = str(round(float(ep_rating), 1))
         
         row = EpisodeRowWidget(display_title, desc, path=rel_path, ep_num=ep_num, rating=ep_rating)
         if ep_num:

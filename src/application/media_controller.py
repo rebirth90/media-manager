@@ -5,10 +5,10 @@ import qbittorrentapi
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 
 from src.infrastructure.services.image_downloader import ImageDownloaderThread
-from src.infrastructure.services.torrent_poller import TorrentPollingThread
 from src.infrastructure.services.tmdb_fetcher import TMDBFetcherThread, TMDBEpisodeFetcherThread
-from src.infrastructure.services.qbittorrent import QBittorrentClient, QBittorrentFilesWorker
+from src.infrastructure.services.qbittorrent import QBittorrentClient, QBittorrentFilesWorker, QBittorrentPollingThread
 from src.infrastructure.services.ssh_client import SSHTelemetryClient
+from src.application.use_cases.sync_use_cases import SyncTorrentStateUseCase
 
 import re
 
@@ -54,12 +54,12 @@ class MediaController(QObject):
     title_resolved = pyqtSignal(int, str) # flow_index, title
     details_resolved = pyqtSignal(int, dict) # flow_index, details_dict
     image_downloaded = pyqtSignal(int, bytes) # flow_index, image_bytes
-    ssh_telemetry_updated = pyqtSignal(int, str) # flow_index, json_payload
     torrent_files_resolved = pyqtSignal(int, list) # flow_index, files_list
     season_episodes_resolved = pyqtSignal(int, dict) # flow_index, episodes_dict
     
-    def __init__(self, parent=None):
+    def __init__(self, repo: Any, parent=None):
         super().__init__(parent)
+        self.repo = repo
         self._threads = []
         self._qbit_client = None
         self._poll_worker = None
@@ -70,11 +70,11 @@ class MediaController(QObject):
         if self._poll_worker:
             return
 
-        self._poll_worker = TorrentPollingThread(self)
-        self._poll_worker.data_updated.connect(self.torrents_updated.emit)
+        sync_uc = SyncTorrentStateUseCase(self.repo)
+        self._poll_worker = QBittorrentPollingThread(repo=self.repo, sync_use_case=sync_uc, parent=self)
         self._poll_worker.start()
 
-    def add_media_flow(self, flow_index: int, title: str, relative_path: str, torrent_bytes: bytes, image_url: str, is_restored: bool = False):
+    def add_media_flow(self, flow_index: int, title: str, relative_path: str, torrent_bytes: bytes, image_url: str, is_restored: bool = False, tmdb_id: str = None, media_type: str = "movie", season: str = ""):
         """Bootstraps the background tasks for a newly added media flow."""
         logger.info(f"Adding media flow [{flow_index}]: {title}")
         
@@ -100,7 +100,7 @@ class MediaController(QObject):
                 if media_type == "tv" and season_num:
                     self.request_season_episodes(flow_index, tmdb_id, season_num)
 
-                fetcher = TMDBFetcherThread(tmdb_id, media_type, self)
+                fetcher = TMDBFetcherThread(self.repo, tmdb_id, media_type, self)
                 
                 def on_title_resolved(resolved_title, idx=flow_index, s_num=season_num):
                     final_title = resolved_title
@@ -118,10 +118,9 @@ class MediaController(QObject):
                 
                 fetcher.details_resolved.connect(handle_details)
                 
-                if not is_restored:
-                    fetcher.title_resolved.connect(
-                        lambda resolved_title, idx=flow_index: self.start_ssh_telemetry(idx, resolved_title)
-                    )
+                fetcher.title_resolved.connect(
+                    lambda resolved_title, idx=flow_index: self.start_ssh_telemetry(idx, resolved_title)
+                )
                 
                 self._threads.append(fetcher)
                 fetcher.start()
@@ -129,11 +128,33 @@ class MediaController(QObject):
                 logger.error(f"Error starting TMDB resolution for {title}: {e}")
                 self.title_resolved.emit(flow_index, title)
         else:
+            if is_restored and media_type == 'tv-series':
+                season_num = None
+                _, parsed_s, _ = parse_tv_title(title)
+                if parsed_s: season_num = parsed_s
+                if not season_num:
+                    _, parsed_s, _ = parse_tv_title(os.path.basename(relative_path))
+                    if parsed_s: season_num = parsed_s
+                
+                # Ultimate fallback for restored items: use explicitly passed season if we couldn't parse it
+                if not season_num and season:
+                    import re
+                    s_num_match = re.sub(r'\D', '', str(season))
+                    if s_num_match: season_num = int(s_num_match)
+
+                # Backward compatibility: Try recovering tmdb_id from cache if missing
+                if not tmdb_id:
+                    tmdb_id = self.repo.recover_tmdb_id_by_title(title)
+                    if tmdb_id:
+                        self.repo.update_tmdb_id(flow_index, tmdb_id)
+                
+                if season_num and tmdb_id:
+                    self.request_season_episodes(flow_index, tmdb_id, season_num)
+
             if image_url:
                 self.fetch_image(flow_index, image_url)
             # For plain-string titles, start SSH telemetry immediately
-            if not is_restored:
-                self.start_ssh_telemetry(flow_index, title)
+            self.start_ssh_telemetry(flow_index, title)
             
         # 2. Add to qBittorrent if it's new
         if not is_restored and torrent_bytes:
@@ -172,11 +193,9 @@ class MediaController(QObject):
 
     def start_ssh_telemetry(self, flow_index: int, target_title: str):
         logger.info(f"Initializing SSH telemetry for: {target_title}")
-        ssh_worker = SSHTelemetryClient(target_title=target_title, parent=self)
-        ssh_worker.telemetry_data.connect(lambda json_payload: 
-            self.ssh_telemetry_updated.emit(flow_index, json_payload)
-        )
-        ssh_worker.error.connect(lambda err: logger.error(f"[Telemetry Error - {target_title}]: {err}"))
+        from src.application.use_cases.sync_use_cases import SyncConversionStateUseCase
+        sync_uc = SyncConversionStateUseCase(self.repo)
+        ssh_worker = SSHTelemetryClient(repo=self.repo, sync_use_case=sync_uc, item_id=flow_index, target_title=target_title, parent=self)
         self._threads.append(ssh_worker)
         ssh_worker.start()
 
@@ -188,7 +207,18 @@ class MediaController(QObject):
         worker.start()
 
     def request_season_episodes(self, flow_index: int, tmdb_id: str, season_num: int):
-        worker = TMDBEpisodeFetcherThread(tmdb_id, season_num, self)
+        # 1. Immediate Cache Hit for "Zero Latency" UI
+        cache_key = f"eps_{tmdb_id}_{season_num}"
+        cached = self.repo.get_tmdb_cache(cache_key, "tv_season")
+        if cached:
+            try:
+                import json
+                eps = json.loads(cached)
+                self.season_episodes_resolved.emit(flow_index, eps)
+            except: pass
+
+        # 2. Start worker anyway to ensure we have the freshest data (or if cache was empty)
+        worker = TMDBEpisodeFetcherThread(self.repo, tmdb_id, season_num, self)
         worker.episodes_resolved.connect(lambda eps: self.season_episodes_resolved.emit(flow_index, eps))
         worker.error.connect(lambda err: logger.error(f"[TMDB Episodes Error - {flow_index}]: {err}"))
         self._threads.append(worker)

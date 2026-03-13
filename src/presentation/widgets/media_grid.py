@@ -1,6 +1,6 @@
 import json
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QGraphicsOpacityEffect
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup
 
 from src.application.events import event_bus
 from src.domain.repositories import IMediaRepository
@@ -36,6 +36,9 @@ class MediaGridWidget(QWidget):
         
         self.scroll_area.setWidget(self.scroll_content)
         canvas_layout.addWidget(self.scroll_area)
+
+        self._filter_anim = None
+        self._last_filter_key = None
 
         # Connect EventBus Signals (DDD Reactive State)
         event_bus.media_added_signal.connect(self._on_media_added)
@@ -123,6 +126,19 @@ class MediaGridWidget(QWidget):
         item = self.repo.get_item(item_id)
         if item:
             self._render_item(item)
+            # Fade-in animation for the new card
+            flow = self.all_flows[-1] if self.all_flows else None
+            if flow:
+                effect = QGraphicsOpacityEffect(flow)
+                effect.setOpacity(0.0)
+                flow.setGraphicsEffect(effect)
+                anim = QPropertyAnimation(effect, b"opacity", flow)
+                anim.setDuration(300)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                anim.finished.connect(lambda: flow.setGraphicsEffect(None))
+                anim.start()
 
     def _on_media_deleted(self, item_id: int):
         flow = self._get_flow_by_id(item_id)
@@ -152,6 +168,14 @@ class MediaGridWidget(QWidget):
             )
             if t_info.get("prog_val", 0.0) >= 1.0:
                 flow.torrent_completed = True
+            
+            # Populate episode rows when file list first arrives for TV series
+            cached_files = t_info.get("files", [])
+            if cached_files and hasattr(flow, 'populate_episodes_from_files'):
+                if not getattr(flow, '_cached_files', None):
+                    flow._cached_files = cached_files
+                    tmdb_eps = getattr(flow, '_cached_tmdb_eps', None)
+                    flow.populate_episodes_from_files(cached_files, tmdb_eps)
         except: pass
 
     def _on_conversion_updated(self, item_id: int):
@@ -180,10 +204,49 @@ class MediaGridWidget(QWidget):
         flow.update_metadata(item.title, desc, genre, rating)
 
     def filter_items(self, query: str, category: str):
-        query = query.lower().strip()
-        for flow in self.all_flows:
-            title = flow.title_lbl.text().lower()
-            matches_search = not query or query in title
-            matches_category = (category == "TV Series" and getattr(flow, 'media_type', 'movie') == 'tv-series') or \
-                               (category == "Movies" and getattr(flow, 'media_type', 'movie') == 'movie')
-            flow.setVisible(matches_search and matches_category)
+        filter_key = f"{query.lower().strip()}|{category}"
+        if filter_key == self._last_filter_key:
+            return
+        self._last_filter_key = filter_key
+
+        # If an animation is already running, finish it instantly
+        if self._filter_anim and self._filter_anim.state() == QSequentialAnimationGroup.State.Running:
+            self._filter_anim.stop()
+        if self.scroll_content.graphicsEffect():
+            self.scroll_content.setGraphicsEffect(None)
+
+        q = query.lower().strip()
+
+        def _apply_visibility():
+            for flow in self.all_flows:
+                title = flow.title_lbl.text().lower()
+                matches_search = not q or q in title
+                matches_category = (category == "TV Series" and getattr(flow, 'media_type', 'movie') == 'tv-series') or \
+                                   (category == "Movies" and getattr(flow, 'media_type', 'movie') == 'movie')
+                flow.setVisible(matches_search and matches_category)
+
+        # Crossfade: fade out → update → fade in
+        seq = QSequentialAnimationGroup(self)
+        self._filter_anim = seq
+
+        effect = QGraphicsOpacityEffect(self.scroll_content)
+        effect.setOpacity(1.0)
+        self.scroll_content.setGraphicsEffect(effect)
+
+        fade_out = QPropertyAnimation(effect, b"opacity", self)
+        fade_out.setDuration(120)
+        fade_out.setStartValue(1.0)
+        fade_out.setEndValue(0.0)
+        fade_out.setEasingCurve(QEasingCurve.Type.OutCubic)
+        fade_out.finished.connect(_apply_visibility)
+
+        fade_in = QPropertyAnimation(effect, b"opacity", self)
+        fade_in.setDuration(150)
+        fade_in.setStartValue(0.0)
+        fade_in.setEndValue(1.0)
+        fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        seq.addAnimation(fade_out)
+        seq.addAnimation(fade_in)
+        seq.finished.connect(lambda: self.scroll_content.setGraphicsEffect(None))
+        seq.start()

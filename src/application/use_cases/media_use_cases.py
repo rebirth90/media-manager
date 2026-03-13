@@ -8,13 +8,20 @@ class AddMediaUseCase:
         self.repo = repo
 
     def execute(self, relative_path: str, image_url: str, title: str, season: str = "", is_season: int = 0, media_type: str = 'movie') -> int:
+        tmdb_id = None
+        if title.startswith('tmdb:'):
+            parts = title.split(':')
+            if len(parts) >= 3:
+                tmdb_id = parts[2]
+                
         item = MediaItem(
             relative_path=relative_path,
             image_url=image_url,
             title=title,
             season=season,
             is_season=is_season,
-            media_type=media_type
+            media_type=media_type,
+            tmdb_id=tmdb_id
         )
         item_id = self.repo.add_item(item)
         event_bus.media_added_signal.emit(item_id)

@@ -39,3 +39,4 @@ class MediaItem:
     conversion_data: Optional[str] = None
     is_season: int = 0
     media_type: str = 'movie'
+    tmdb_id: Optional[str] = None

@@ -32,7 +32,7 @@ class AppController(QObject):
         
         # MediaController will eventually be broken into UseCases in the Application Layer,
         # but for now we inject the repo indirectly or simply retain its capabilities.
-        self.media_controller = MediaController(self)
+        self.media_controller = MediaController(self.repo, self)
         
         # 3. Create and configure Main Dashboard
         self.main_window = MainDashboard(self.shared_profile, self.media_controller, self.repo)

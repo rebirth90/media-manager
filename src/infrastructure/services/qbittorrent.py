@@ -171,6 +171,14 @@ class QBittorrentPollingThread(QThread):
                             "active_state_str": active_state_str
                         })
                         
+                        # Fetch file list once for TV series to enable episode rows
+                        if item.is_season and "files" not in t_info and new_hash:
+                            try:
+                                raw_files = client.torrents_files(torrent_hash=new_hash)
+                                t_info["files"] = [{"name": f.get("name", "")} for f in raw_files]
+                            except:
+                                pass
+                        
                         # Use Domain Case to update DB and emit via EventBus
                         self.sync_use_case.execute(item.id, json.dumps(t_info))
                         

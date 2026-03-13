@@ -149,12 +149,23 @@ class TMDBEpisodeFetcherThread(QThread):
     episodes_resolved = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, tmdb_id: str, season_number: int, parent=None):
+    def __init__(self, repo: IMediaRepository, tmdb_id: str, season_number: int, parent=None):
         super().__init__(parent)
+        self.repo = repo
         self.tmdb_id = tmdb_id
         self.season_number = season_number
 
     def run(self) -> None:
+        # Check cache first
+        cache_key = f"eps_{self.tmdb_id}_{self.season_number}"
+        cached = self.repo.get_tmdb_cache(cache_key, "tv_season")
+        if cached:
+            try:
+                self.episodes_resolved.emit(json.loads(cached))
+                return
+            except:
+                pass
+
         token = os.getenv("TMDB_READ_ACCESS_TOKEN")
         # Reuse fallback logic if needed, but assuming env is set for now
         if not token:
@@ -175,6 +186,25 @@ class TMDBEpisodeFetcherThread(QThread):
             "Authorization": f"Bearer {token}"
         }
         
+        # External ID resolution for episodes
+        if self.tmdb_id.startswith("tt"):
+            find_url = f"https://api.themoviedb.org/3/find/{self.tmdb_id}?external_source=imdb_id"
+            try:
+                find_res = requests.get(find_url, headers=headers, timeout=10)
+                if find_res.status_code == 200:
+                    find_data = find_res.json()
+                    if find_data.get("tv_results"):
+                        self.tmdb_id = str(find_data["tv_results"][0]["id"])
+                    else:
+                        self.error.emit("IMDB ID not found in TMDB (TV).")
+                        return
+                else:
+                    self.error.emit(f"TMDB Find API Error: {find_res.status_code}")
+                    return
+            except Exception as e:
+                self.error.emit(str(e))
+                return
+
         url = f"https://api.themoviedb.org/3/tv/{self.tmdb_id}/season/{self.season_number}"
         
         try:
@@ -194,6 +224,7 @@ class TMDBEpisodeFetcherThread(QThread):
                         "still_url": still_url,
                         "vote_average": ep.get("vote_average", "-")
                     }
+                self.repo.set_tmdb_cache(cache_key, "tv_season", json.dumps(ep_map))
                 self.episodes_resolved.emit(ep_map)
             else:
                 self.error.emit(f"TMDB Episode API Error: {response.status_code}")

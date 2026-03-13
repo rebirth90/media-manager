@@ -40,6 +40,7 @@ class BrowserModalDialog(QDialog):
 
         self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
         self._current_request = None
+        self._accepted_download = False
 
     def _on_download_requested(self, request: QWebEngineDownloadRequest) -> None:
         self._current_request = request
@@ -54,13 +55,19 @@ class BrowserModalDialog(QDialog):
         
         def try_finish():
             if state_dict["completed"] and state_dict["title"] is not None:
-                if state_dict["emitted"]: return
+                if state_dict["emitted"] or self._accepted_download: return
                 state_dict["emitted"] = True
+                self._accepted_download = True
                 
                 file_path = request.downloadDirectory() + os.sep + request.downloadFileName()
                 print(f"DEBUG: Download completed successfully! File: {file_path}")
-                self.torrent_downloaded.emit(file_path, state_dict["img_url"], state_dict["title"], state_dict.get("season") or "")
+                
+                # Close the browser modal synchronously, then asynchronously signal the main window
+                # so the 'Construct path' dialog does not nest its event loop inside the browser modal's async JS callback.
                 self.accept()
+                
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(150, lambda: self.torrent_downloaded.emit(file_path, state_dict["img_url"], state_dict["title"], state_dict.get("season") or ""))
                 
         def on_state_changed(state):
             print(f"DEBUG: State changed to {state}")

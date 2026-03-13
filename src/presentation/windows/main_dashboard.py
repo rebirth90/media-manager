@@ -80,7 +80,10 @@ class MainDashboard(QMainWindow):
                 relative_path=item.relative_path,
                 torrent_bytes=b"",
                 image_url=item.image_url or "",
-                is_restored=True
+                is_restored=True,
+                tmdb_id=item.tmdb_id,
+                media_type=item.media_type,
+                season=item.season
             )
             
         self.media_grid.filter_items("", "Movies")
@@ -177,9 +180,10 @@ class MainDashboard(QMainWindow):
         flow = self.media_grid._get_flow_by_id(flow_index)
         if flow and hasattr(flow, '_ensure_episode_row'):
             from PyQt6.QtCore import QTimer
-            flow._tmdb_episodes = episodes
+            flow._cached_tmdb_eps = episodes
+            # If files arrived first, populate now. Otherwise media_grid will do it when they arrive.
             if getattr(flow, '_cached_files', None):
-                QTimer.singleShot(0, lambda: flow.populate_episodes_from_files(flow._cached_files))
+                QTimer.singleShot(0, lambda: flow.populate_episodes_from_files(flow._cached_files, episodes))
 
     def _on_media_toggle_changed(self, index: int) -> None:
         category = "TV Series" if index == 1 else "Movies"
