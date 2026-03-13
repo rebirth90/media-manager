@@ -568,6 +568,10 @@ class EpisodeRowWidget(QFrame):
                 stage_flags["p8-tv"] = True
                 stage_flags["p8-cleanup"] = True
 
+        # Rule 3: Isolate Flowchart State
+        if percentage == 0 or state_text.upper() in ["NOT STARTED", "QUEUED"]:
+            stage_flags = {}
+
         self.flowchart_view.update_pipeline_state(stage_flags)
 
 
@@ -855,6 +859,7 @@ class SeriesCardWidget(QWidget):
         if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
         ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
         
+        # Rule 4: Strict Regex Guard
         if ep_num is None:
             return None
         
@@ -892,11 +897,10 @@ class SeriesCardWidget(QWidget):
             rel_path = f_info.get('name', '')
             if not rel_path: continue
             self._ensure_episode_row(rel_path, tmdb_episodes)
-
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
-        total_percentage_sum = 0
-        active_status_text = "Not Started"
+        total_percentage_sum = 0.0
+        active_eps = []
         
         for ep_data in episodes_data:
             path = ep_data.get("path", "")
@@ -921,15 +925,22 @@ class SeriesCardWidget(QWidget):
             state_text, ep_prog = calculate_conversion_progress(ep_data)
             total_percentage_sum += ep_prog
             
-            if row:
-                row.update_status(ep_data)
+            row.update_status(ep_data)
 
-            if 0 < ep_prog < 100 and active_status_text == "Not Started":
-                ep_num = row.ep_num if row else None
-                active_status_text = f"EP{ep_num} - {state_text}" if ep_num else state_text
+            # Rule 2: Track active episodes for sorting
+            is_processing = (ep_data.get("db_status") or ep_data.get("status") or "").upper() == "PROCESSING"
+            if (0 < ep_prog < 100) or is_processing:
+                active_eps.append((row.ep_num or 999, state_text, row.badge.text()))
 
         total_eps = len(episodes_data) if episodes_data else 1
         aggregate_progress = int(total_percentage_sum / total_eps)
+        
+        # Rule 2: Determine active status text based on numerical sorting
+        active_status_text = "Not Started"
+        if active_eps:
+            active_eps.sort(key=lambda x: x[0])
+            first_active = active_eps[0]
+            active_status_text = f"{first_active[2]} - {first_active[1]}"
         
         if all(calculate_conversion_progress(ed)[1] == 100 for ed in episodes_data):
             final_status = "Completed"
