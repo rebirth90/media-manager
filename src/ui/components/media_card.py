@@ -5,7 +5,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QColor, QPen
 from PyQt6.QtCore import QRectF, QSize
 from PyQt6.QtWidgets import (
     QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QSizePolicy, QDialog,
-    QGraphicsOpacityEffect
+    QGraphicsOpacityEffect, QScrollArea
 )
 
 from src.ui.dialogs.flow_details import FlowDetailsModal
@@ -202,30 +202,33 @@ class MediaCardWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(400)
+            self._foldout_anim.setDuration(350)
             self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
 
         self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
 
-        parent = self.parentWidget()
-        if parent: parent.setUpdatesEnabled(False)
+        scroll_area = self.window().findChild(QScrollArea)
+        if scroll_area: scroll_area.setUpdatesEnabled(False)
+        
+        def restore_updates():
+            if scroll_area: scroll_area.setUpdatesEnabled(True)
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            target_h = self.foldout_container.sizeHint().height() or 550
+            target_h = self.foldout_layout.sizeHint().height() + 20
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
                 self.foldout_container.setMaximumHeight(16777215)
-                if parent: parent.setUpdatesEnabled(True)
+                restore_updates()
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
         else:
             def on_close_finished(): 
                 self.foldout_container.setVisible(False)
-                if parent: parent.setUpdatesEnabled(True)
+                restore_updates()
             self._foldout_anim.finished.connect(on_close_finished)
             self._foldout_anim.setStartValue(self.foldout_container.height())
             self._foldout_anim.setEndValue(0)
@@ -291,7 +294,10 @@ class MediaCardWidget(QFrame):
         self.lbl_conv_status.setProperty("class", pill_css)
         self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
         self.lbl_conv_status.style().polish(self.lbl_conv_status)
+        
         self.prog_pill_conv.set_data(state_text, percentage)
+        self.prog_pill_conv.update()
+        self.prog_pill_conv.repaint()
         
         stage_flags_raw = first_ep.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
@@ -316,6 +322,9 @@ class MediaCardWidget(QFrame):
                 stage_flags["p8-movie"] = True
                 stage_flags["p8-cleanup"] = True
 
+        if percentage == 0 and db_status not in ["COMPLETED"]:
+            stage_flags = {}
+
         self.flowchart_view.update_pipeline_state(stage_flags)
 
 
@@ -323,7 +332,6 @@ class MediaCardWidget(QFrame):
 # TV Series Episode Child Row (No Torrent Details, Expandable)
 # -------------------------------------------------------------
 class EpisodeRowWidget(QFrame):
-    """Episode row designed to perfectly mimic the standard movie row, strictly indented beneath the season parent."""
     delete_episode = pyqtSignal(str) 
 
     def __init__(self, ep_name: str, ep_desc: str = "No description available.", path: str = "", ep_num: int = None, rating: str = "-", parent=None):
@@ -333,6 +341,10 @@ class EpisodeRowWidget(QFrame):
         self.ep_path = path
         self.ep_rating = rating
         self._image_thread = None
+        
+        # State tracking for mathematically accurate parent aggregation
+        self.current_progress = 0
+        self.current_state_text = "Not Started"
         
         self.setObjectName("MediaCardWrapper")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -402,7 +414,6 @@ class EpisodeRowWidget(QFrame):
 
         layout.addLayout(status_layout)
 
-        # Exact matched buttons wrapper container
         self.action_buttons_container = QWidget()
         self.action_buttons_container.setFixedWidth(100)
         actions_layout = QHBoxLayout(self.action_buttons_container)
@@ -453,30 +464,33 @@ class EpisodeRowWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(400)
+            self._foldout_anim.setDuration(350)
             self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
 
         self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
         except TypeError: pass
 
-        parent = self.parentWidget()
-        if parent: parent.setUpdatesEnabled(False)
+        scroll_area = self.window().findChild(QScrollArea)
+        if scroll_area: scroll_area.setUpdatesEnabled(False)
+        
+        def restore_updates():
+            if scroll_area: scroll_area.setUpdatesEnabled(True)
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            target_h = self.foldout_container.sizeHint().height() or 550
+            target_h = self.foldout_layout.sizeHint().height() + 20
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
                 self.foldout_container.setMaximumHeight(16777215)
-                if parent: parent.setUpdatesEnabled(True)
+                restore_updates()
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
         else:
             def on_close_finished(): 
                 self.foldout_container.setVisible(False)
-                if parent: parent.setUpdatesEnabled(True)
+                restore_updates()
             self._foldout_anim.finished.connect(on_close_finished)
             self._foldout_anim.setStartValue(self.foldout_container.height())
             self._foldout_anim.setEndValue(0)
@@ -510,7 +524,6 @@ class EpisodeRowWidget(QFrame):
         if image_bytes:
             pixmap = QPixmap()
             if pixmap.loadFromData(image_bytes):
-                # Scale the horizontal still into a center-cropped vertical thumbnail slice
                 scaled = pixmap.scaled(self.badge.width(), self.badge.height(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
                 rounded = QPixmap(scaled.size())
                 rounded.fill(Qt.GlobalColor.transparent)
@@ -529,20 +542,49 @@ class EpisodeRowWidget(QFrame):
                 self.badge.setText("")
                 self.badge.setStyleSheet("background-color: transparent;")
 
-    def update_status(self, ep_data: dict):
+    def update_status(self, ep_data: dict = None):
         from src.ui.components.progress_pill import calculate_conversion_progress
-        state_text, percentage = calculate_conversion_progress(ep_data)
         
+        if not ep_data:
+            self.current_progress = 0
+            self.current_state_text = "Not Started"
+            self.lbl_conv_status.setText("Not Started")
+            self.lbl_conv_status.setProperty("class", "PillUnknown")
+            self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
+            self.lbl_conv_status.style().polish(self.lbl_conv_status)
+            self.prog_pill_conv.set_data("Not Started", 0)
+            self.flowchart_view.update_pipeline_state({})
+            return
+
+        state_text, percentage = calculate_conversion_progress(ep_data)
+        db_status = (ep_data.get("db_status") or ep_data.get("status") or "NOT STARTED").upper()
+        
+        # STRICT OVERRIDE: Eliminate backend hallucination for queued items
+        if db_status == "COMPLETED":
+            percentage = 100
+            state_text = "Completed"
+        elif db_status in ["NOT STARTED", "PENDING", "QUEUED", "WAITING"]:
+            percentage = 0
+            state_text = db_status.capitalize() if db_status != "NOT STARTED" else "Not Started"
+            
+        self.current_progress = percentage
+        self.current_state_text = state_text
+            
         pill_css = "PillUnknown"
         if state_text == "Completed": pill_css = "PillSuccess"
         elif "Failed" in state_text: pill_css = "PillDanger"
-        elif percentage > 0: pill_css = "PillActive"
+        elif percentage > 0 or db_status not in ["COMPLETED", "NOT STARTED", "FAILED", "REJECTED", "PENDING", "QUEUED", "WAITING"]: 
+            pill_css = "PillActive"
 
         self.lbl_conv_status.setText(state_text)
         self.lbl_conv_status.setProperty("class", pill_css)
         self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
         self.lbl_conv_status.style().polish(self.lbl_conv_status)
+        self.lbl_conv_status.update()
+        
         self.prog_pill_conv.set_data(state_text, percentage)
+        self.prog_pill_conv.update()
+        self.prog_pill_conv.repaint()
 
         stage_flags_raw = ep_data.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
@@ -554,7 +596,6 @@ class EpisodeRowWidget(QFrame):
         else:
             stage_flags = stage_flags_raw.copy() if stage_flags_raw else {}
             
-        db_status = (ep_data.get("db_status") or ep_data.get("status") or "").upper()
         if db_status == "COMPLETED":
             stage_flags["p8-complete"] = True
             if not any(k.startswith("p3-") for k in stage_flags):
@@ -568,8 +609,8 @@ class EpisodeRowWidget(QFrame):
                 stage_flags["p8-tv"] = True
                 stage_flags["p8-cleanup"] = True
 
-        # Rule 3: Isolate Flowchart State
-        if percentage == 0 or state_text.upper() in ["NOT STARTED", "QUEUED"]:
+        # STRICT ISOLATION: Wipe visual pipeline for pending episodes
+        if percentage == 0 and db_status not in ["COMPLETED"]:
             stage_flags = {}
 
         self.flowchart_view.update_pipeline_state(stage_flags)
@@ -579,7 +620,6 @@ class EpisodeRowWidget(QFrame):
 # TV Series Parent Card (With full Torrent Details + Aggregate logic)
 # -------------------------------------------------------------
 class SeriesCardWidget(QWidget): 
-    """Parent Row for a Season. Cleanly isolates standard row styling preventing foldout leakage."""
     delete_confirmed = pyqtSignal(list, bool, object)
 
     def __init__(self, index: int, relative_path: str, title: str, season: str, is_season: bool = False, hash_val: str = "", db_id: int = -1, parent=None):
@@ -610,7 +650,6 @@ class SeriesCardWidget(QWidget):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(8) 
 
-        # Using a structural replica of the standard MediaCard to guarantee identical CSS mappings
         self.top_row_wrapper = QFrame() 
         self.top_row_wrapper.setObjectName("MediaCardWrapper") 
         self.top_row_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -706,7 +745,6 @@ class SeriesCardWidget(QWidget):
         
         top_layout.addLayout(status_layout)
 
-        # Exact matched buttons wrapper container
         self.action_buttons_container = QWidget()
         self.action_buttons_container.setFixedWidth(100)
         actions_layout = QHBoxLayout(self.action_buttons_container)
@@ -769,26 +807,28 @@ class SeriesCardWidget(QWidget):
         try: self._ep_anim.finished.disconnect()
         except TypeError: pass
         
-        # Performance: Disable updates on the scroll content to prevent jitter
-        parent = self.parentWidget()
-        if parent: parent.setUpdatesEnabled(False)
+        scroll_area = self.window().findChild(QScrollArea)
+        if scroll_area: scroll_area.setUpdatesEnabled(False)
+        
+        def restore_updates():
+            if scroll_area: scroll_area.setUpdatesEnabled(True)
         
         if self._expanded:
             self.episodes_container.setVisible(True)
             self.btn_expand.setIcon(QIcon(os.path.join(base_dir, "assets", "chevron_up.svg")))
-            target_h = self.episodes_container.sizeHint().height() or 400
+            target_h = self.episodes_layout.sizeHint().height() + 20
             self._ep_anim.setStartValue(0)
             self._ep_anim.setEndValue(target_h)
             def on_ep_open(): 
                 self.episodes_container.setMaximumHeight(16777215)
-                if parent: parent.setUpdatesEnabled(True)
+                restore_updates()
             self._ep_anim.finished.connect(on_ep_open)
             self._ep_anim.start()
         else:
             self.btn_expand.setIcon(QIcon(os.path.join(base_dir, "assets", "chevron_down.svg")))
             def on_ep_close(): 
                 self.episodes_container.setVisible(False)
-                if parent: parent.setUpdatesEnabled(True)
+                restore_updates()
             self._ep_anim.finished.connect(on_ep_close)
             self._ep_anim.setStartValue(self.episodes_container.height())
             self._ep_anim.setEndValue(0)
@@ -859,7 +899,6 @@ class SeriesCardWidget(QWidget):
         if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
         ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
         
-        # Rule 4: Strict Regex Guard
         if ep_num is None:
             return None
         
@@ -879,14 +918,23 @@ class SeriesCardWidget(QWidget):
                     ep_rating = str(round(float(ep_rating), 1))
         
         row = EpisodeRowWidget(display_title, desc, path=rel_path, ep_num=ep_num, rating=ep_rating)
-        if ep_num:
-            row.badge.setText(f"EP {ep_num}")
+        row.badge.setText(f"EP {ep_num}")
             
         if still_url:
             row.update_tmdb_data(display_title, desc, still_url)
             
         self.episodes_map[rel_path] = row
-        self.episodes_layout.addWidget(row)
+        
+        insert_idx = self.episodes_layout.count()
+        for i in range(self.episodes_layout.count()):
+            existing_widget = self.episodes_layout.itemAt(i).widget()
+            if isinstance(existing_widget, EpisodeRowWidget):
+                existing_ep_num = getattr(existing_widget, 'ep_num', 999) or 999
+                if ep_num < existing_ep_num:
+                    insert_idx = i
+                    break
+                    
+        self.episodes_layout.insertWidget(insert_idx, row)
         return row
 
     def populate_episodes_from_files(self, files: list, tmdb_episodes: dict = None):
@@ -897,56 +945,79 @@ class SeriesCardWidget(QWidget):
             rel_path = f_info.get('name', '')
             if not rel_path: continue
             self._ensure_episode_row(rel_path, tmdb_episodes)
+
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
-        total_percentage_sum = 0.0
-        active_eps = []
         
+        # 1. Update matching rows with explicit telemetry
         for ep_data in episodes_data:
             path = ep_data.get("path", "")
             if not path: continue
             
             row = self.episodes_map.get(path)
+            
+            # Strict fallback match using EP Number
             if not row:
                 fname = os.path.basename(path)
+                match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', fname)
+                if not match: match = re.search(r'[eE](\d{1,2})', fname)
+                ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
+                
                 for qbit_path, widget in self.episodes_map.items():
                     if os.path.basename(qbit_path) == fname:
-                        row = widget
-                        break
-            
+                        if ep_num is not None and getattr(widget, 'ep_num', None) == ep_num:
+                            row = widget
+                            break
+                        elif ep_num is None:
+                            row = widget
+                            break
+                            
             if not row:
                 row = self._ensure_episode_row(path, getattr(self, '_cached_tmdb_eps', None))
-            
-            # Guard clause: if row is still None after trying to ensure it, skip this episode
-            if not row:
-                continue
+                
+            if row:
+                row.update_status(ep_data)
 
-            from src.ui.components.progress_pill import calculate_conversion_progress
-            state_text, ep_prog = calculate_conversion_progress(ep_data)
+        # 2. Derive true season average from the physically stored states of ALL rows
+        total_percentage_sum = 0.0
+        active_eps = []
+        
+        for path, row in self.episodes_map.items():
+            ep_prog = getattr(row, 'current_progress', 0)
+            state_text = getattr(row, 'current_state_text', "Not Started")
+            
             total_percentage_sum += ep_prog
-            
-            row.update_status(ep_data)
 
-            # Rule 2: Track active episodes for sorting
-            is_processing = (ep_data.get("db_status") or ep_data.get("status") or "").upper() == "PROCESSING"
-            if (0 < ep_prog < 100) or is_processing:
-                active_eps.append((row.ep_num or 999, state_text, row.badge.text()))
+            # Active Episode Logic
+            is_active = False
+            if 0 < ep_prog < 100:
+                is_active = True
+            elif state_text.upper() not in ["NOT STARTED", "COMPLETED", "FAILED", "REJECTED", "PENDING", "QUEUED", "WAITING"]:
+                is_active = True
+                
+            if is_active:
+                ep_num_val = getattr(row, 'ep_num', None)
+                ep_badge = f"EP{ep_num_val}" if ep_num_val else "EP?"
+                active_eps.append((ep_num_val or 999, state_text, ep_badge))
 
-        total_eps = len(episodes_data) if episodes_data else 1
-        aggregate_progress = int(total_percentage_sum / total_eps)
-        
-        # Rule 2: Determine active status text based on numerical sorting
-        active_status_text = "Not Started"
-        if active_eps:
-            active_eps.sort(key=lambda x: x[0])
-            first_active = active_eps[0]
-            active_status_text = f"{first_active[2]} - {first_active[1]}"
-        
-        if all(calculate_conversion_progress(ed)[1] == 100 for ed in episodes_data):
-            final_status = "Completed"
-        elif active_status_text != "Not Started":
-            final_status = active_status_text
+        # 3. Denominator must be total TMDB episodes, not just currently downloaded files
+        tmdb_eps = getattr(self, '_cached_tmdb_eps', None)
+        if tmdb_eps and isinstance(tmdb_eps, dict) and len(tmdb_eps) > 0:
+            total_eps_count = len(tmdb_eps)
         else:
+            total_eps_count = len(self.episodes_map)
+            
+        total_eps_count = max(1, total_eps_count)
+        aggregate_progress = int(total_percentage_sum / total_eps_count)
+        
+        if aggregate_progress == 100: 
+            final_status = "Completed"
+        elif active_eps:
+            active_eps.sort(key=lambda x: x[0])
+            final_status = f"{active_eps[0][2]} - {active_eps[0][1]}"
+        elif aggregate_progress > 0: 
+            final_status = "Converting..."
+        else: 
             final_status = "Not Started"
             
         pill_css = "PillUnknown"
@@ -958,7 +1029,11 @@ class SeriesCardWidget(QWidget):
         self.lbl_conv_status.setProperty("class", pill_css)
         self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
         self.lbl_conv_status.style().polish(self.lbl_conv_status)
+        self.lbl_conv_status.update()
+        
         self.prog_pill_conv.set_data(final_status, aggregate_progress)
+        self.prog_pill_conv.update()
+        self.prog_pill_conv.repaint()
 
     def _prompt_delete(self) -> None:
         dialog = DeleteTorrentDialog(self.title, self.window())

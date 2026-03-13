@@ -229,61 +229,123 @@ class ConversionFlowViewer(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-
-        self._view = QWebEngineView()
         self._page_loaded = False
+        self._is_revealed = False
         self._pending_json = None
-        
-        self._view.titleChanged.connect(self._on_title_changed)
+        self._forced_h = 500
 
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(0, 0, 0, 0)
+
+        # --- 1. Loading Container ---
+        self.loading_container = QWidget()
+        self.loading_container.setFixedHeight(150)
+        self.loading_container.setStyleSheet("background-color: transparent;")
+        l_lay = QVBoxLayout(self.loading_container)
+        l_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.lbl_loading = QLabel("Loading Pipeline Engine...")
+        self.lbl_loading.setStyleSheet("color: #00d4c8; font-size: 14px; font-weight: bold; letter-spacing: 1px;")
+        l_lay.addWidget(self.lbl_loading)
+        
+        self.lay.addWidget(self.loading_container)
+        
+        # Pulse Animation for Loading Text
+        self.pulse_effect = QGraphicsOpacityEffect(self.lbl_loading)
+        self.lbl_loading.setGraphicsEffect(self.pulse_effect)
+        self.pulse_anim = QPropertyAnimation(self.pulse_effect, b"opacity")
+        self.pulse_anim.setDuration(800)
+        self.pulse_anim.setStartValue(0.3)
+        self.pulse_anim.setEndValue(1.0)
+        self.pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self.pulse_anim.setLoopCount(-1) # Infinite pulsing
+        self.pulse_anim.start()
+
+        # --- 2. Web View ---
+        self._view = QWebEngineView()
+        self._view.hide() # Hidden during load to prevent visual jumping
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
+        
         settings = self._view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, False)
 
         self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._view.setFixedHeight(300)
         self._view.loadFinished.connect(self._on_load_finished)
 
         from src.presentation.widgets.pipeline_asset_builder import PipelineAssetBuilder
         builder = PipelineAssetBuilder()
         html_content = builder.build_html("{}")
         self._view.setHtml(html_content)
-        lay.addWidget(self._view)
+        self.lay.addWidget(self._view)
 
         self.opacity_effect = QGraphicsOpacityEffect(self._view)
         self._view.setGraphicsEffect(self.opacity_effect)
         self.opacity_effect.setOpacity(0.0)
         
-        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity", self)
-        self.fade_anim.setDuration(300)
-        self.fade_anim.setStartValue(0.0)
-        self.fade_anim.setEndValue(1.0)
-        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        
-    def _on_title_changed(self, title: str):
-        if title.startswith("PIPELINE_HEIGHT:"):
-            try:
-                h = int(title.split(":")[1])
-                self._view.setFixedHeight(h)
-                self.setFixedHeight(h)
-                self.height_calculated.emit(h)
-            except Exception:
-                pass
+        # Lock initial container height to the loading screen size
+        self.setMinimumHeight(150)
+        self.setMaximumHeight(150)
 
     def _on_load_finished(self, ok):
         if ok:
             self._page_loaded = True
-            self.fade_anim.start()
             self._inject_highlight_styles()
+            
             if self._pending_json:
                 self.update_pipeline_state(self._pending_json)
+            
+            # Allow webengine 400ms to paint and JS to settle before revealing
+            QTimer.singleShot(400, self._reveal_pipeline)
+
+    def _reveal_pipeline(self):
+        if self._is_revealed: return
+        self._is_revealed = True
+        
+        self.pulse_anim.stop()
+        
+        # Calculate final mathematical height synchronously
+        w = self.width() if self.width() > 100 else 1000
+        zoom = w / 2440.0 if w < 2440.0 else 1.0
+        target_h = int(750.0 * zoom)
+        self._forced_h = max(target_h, 500)
+        
+        self._view.setZoomFactor(zoom)
+        self._view.setFixedHeight(self._forced_h)
+
+        # Smoothly expand the container layout
+        self.expand_anim = QPropertyAnimation(self, b"maximumHeight")
+        self.expand_anim.setDuration(500)
+        self.expand_anim.setStartValue(150)
+        self.expand_anim.setEndValue(self._forced_h)
+        self.expand_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
+        
+        self.min_expand_anim = QPropertyAnimation(self, b"minimumHeight")
+        self.min_expand_anim.setDuration(500)
+        self.min_expand_anim.setStartValue(150)
+        self.min_expand_anim.setEndValue(self._forced_h)
+        self.min_expand_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
+
+        def on_expand_finished():
+            self.loading_container.hide()
+            self._view.show()
+            
+            # Crossfade the fully loaded webview in
+            self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+            self.fade_anim.setDuration(400)
+            self.fade_anim.setStartValue(0.0)
+            self.fade_anim.setEndValue(1.0)
+            self.fade_anim.start()
+            
+            self.height_calculated.emit(self._forced_h)
+
+        self.expand_anim.finished.connect(on_expand_finished)
+        
+        self.expand_anim.start()
+        self.min_expand_anim.start()
 
     def _inject_highlight_styles(self):
-        """Injects refined CSS for Green Highlighting and expands internal canvas height."""
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
@@ -358,16 +420,20 @@ class ConversionFlowViewer(QWidget):
         return QSize(800, 500)
 
     def resizeEvent(self, event):
-        if event is not None:
-            super().resizeEvent(event)
+        super().resizeEvent(event)
+        
+        # Suppress layout thrashing during load
+        if not self._is_revealed:
+            return 
+
         w = self.width()
-        natural_w = 2440.0
-        natural_h = 750.0
-        zoom = w / natural_w if w < natural_w else 1.0
-        target_h = int(natural_h * zoom)
-        forced_h = max(target_h, 500)
-        self.setMinimumHeight(forced_h)
-        self.setFixedHeight(forced_h)
+        zoom = w / 2440.0 if w < 2440.0 else 1.0
+        target_h = int(750.0 * zoom)
+        self._forced_h = max(target_h, 500)
+        
+        self.setMinimumHeight(self._forced_h)
+        self.setMaximumHeight(self._forced_h)
+        self._view.setFixedHeight(self._forced_h)
         self._view.setZoomFactor(zoom)
 
     def update_pipeline_state(self, stages_data) -> None:
