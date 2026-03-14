@@ -1,16 +1,15 @@
 import os
+import re
 import logging
 from typing import List, Any
 import qbittorrentapi
-from PyQt6.QtCore import QObject, pyqtSignal, QThread
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from src.infrastructure.services.image_downloader import ImageDownloaderThread
 from src.infrastructure.services.tmdb_fetcher import TMDBFetcherThread, TMDBEpisodeFetcherThread
 from src.infrastructure.services.qbittorrent import QBittorrentClient, QBittorrentFilesWorker, QBittorrentPollingThread
 from src.infrastructure.services.ssh_client import SSHTelemetryClient
 from src.application.use_cases.sync_use_cases import SyncTorrentStateUseCase
-
-import re
 
 # Configure Logging for conversion tracking
 logging.basicConfig(
@@ -21,23 +20,30 @@ logger = logging.getLogger("MediaController")
 
 def parse_tv_title(raw_name: str):
     """Parses a torrent name into (Show Name, Season Number, Is Season Pack)."""
-    # 1. Check for episode pattern first: S01E05, 1x05
-    ep_match = re.search(r'(.*?)[. ]s(\d{1,2})e(\d{1,2})', raw_name, re.IGNORECASE)
+    # Clean string to handle different separators (dots, underscores)
+    clean_name = raw_name.replace("_", " ")
+    
+    # 1. Check for episode pattern first: S01E05, 1x05, Season 1 Episode 5
+    ep_match = re.search(r'(.*?)\b[S]eason\s*(\d{1,2})\b.*?\b[E]pisode\s*(\d{1,2})\b', clean_name, re.IGNORECASE)
     if not ep_match:
-        ep_match = re.search(r'(.*?)[. ](\d{1,2})x(\d{1,2})', raw_name, re.IGNORECASE)
+        ep_match = re.search(r'(.*?)\bS(\d{1,2})E(\d{1,2})\b', clean_name, re.IGNORECASE)
+    if not ep_match:
+        ep_match = re.search(r'(.*?)\b(\d{1,2})x(\d{1,2})\b', clean_name, re.IGNORECASE)
         
     if ep_match:
         show_name = ep_match.group(1).replace(".", " ").strip()
+        show_name = re.sub(r'[- ]+$', '', show_name) # Remove trailing hyphens/spaces
         season_num = int(ep_match.group(2))
         return show_name, season_num, False # It's a single episode, no accordion
         
     # 2. Check for season pattern: S03, S3, Season 3
-    s_match = re.search(r'(.*?)[. ]s(\d{1,2})(?:[e. ]|$)', raw_name, re.IGNORECASE)
+    s_match = re.search(r'(.*?)\bS(\d{1,2})\b(?:[^E]|$)', clean_name, re.IGNORECASE)
     if not s_match:
-        s_match = re.search(r'(.*?)[. ]season[. ]?(\d{1,2})', raw_name, re.IGNORECASE)
+        s_match = re.search(r'(.*?)\bSeason\s*(\d{1,2})\b', clean_name, re.IGNORECASE)
         
     if s_match:
         show_name = s_match.group(1).replace(".", " ").strip()
+        show_name = re.sub(r'[- ]+$', '', show_name)
         season_num = int(s_match.group(2))
         return show_name, season_num, True # It is a full season pack, force accordion
         
@@ -94,7 +100,13 @@ class MediaController(QObject):
                 # If we don't have a season num but it's a TV series, try parsing relative_path
                 if media_type == "tv" and not season_num:
                     _, parsed_s, _ = parse_tv_title(os.path.basename(relative_path))
-                    if parsed_s: season_num = parsed_s
+                    if parsed_s: 
+                        season_num = parsed_s
+                    elif season:
+                        # FIX: Make sure we respect the explicit 'season' parameter if parsing fails
+                        s_num_match = re.search(r'\d+', str(season))
+                        if s_num_match: 
+                            season_num = int(s_num_match.group())
 
                 # Boot up the episodes fetch immediately
                 if media_type == "tv" and season_num:
@@ -201,7 +213,47 @@ class MediaController(QObject):
 
     def request_torrent_files(self, flow_index: int, torrent_hash: str):
         worker = QBittorrentFilesWorker(torrent_hash, self)
-        worker.finished.connect(lambda files: self.torrent_files_resolved.emit(flow_index, files))
+        
+        def on_files_ready(files, idx=flow_index):
+            expected_season = None
+            try:
+                item = self.repo.get_item(idx)
+                if item:
+                    # Safely extract season from the database object
+                    season_val = getattr(item, 'season', None)
+                    if season_val:
+                        s_match = re.search(r'\d+', str(season_val))
+                        if s_match:
+                            expected_season = int(s_match.group())
+                    
+                    # Fallback: parse it from the title
+                    if expected_season is None:
+                        title_val = getattr(item, 'title', '')
+                        if title_val:
+                            _, parsed_s, _ = parse_tv_title(str(title_val))
+                            if parsed_s:
+                                expected_season = parsed_s
+            except Exception:
+                pass
+
+            # Filter out files that explicitly belong to a different season
+            filtered_files = []
+            if expected_season is not None:
+                for f in files:
+                    file_path = f.get('name', '').lower()
+                    se_match = re.search(r'(?i)(?:season\s*0*(\d+)|s0*(\d+))', file_path)
+                    if se_match:
+                        file_s = int(se_match.group(1) or se_match.group(2))
+                        if file_s == expected_season:
+                            filtered_files.append(f)
+                    else:
+                        filtered_files.append(f)
+            else:
+                filtered_files = files
+
+            self.torrent_files_resolved.emit(idx, filtered_files)
+
+        worker.finished.connect(on_files_ready)
         worker.error.connect(lambda err: logger.error(f"[Files Fetch Error - {flow_index}]: {err}"))
         self._threads.append(worker)
         worker.start()

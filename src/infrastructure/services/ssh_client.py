@@ -32,20 +32,32 @@ class SSHTelemetryClient(QThread):
         password = os.getenv("SSH_PASS")
         remote_app_dir = os.getenv("REMOTE_APP_DIR")
 
+        # FIX: Fetch the actual torrent path and explicit season from the DB locally
+        search_target = self.target_title
+        explicit_season = ""
+        try:
+            item = self.repo.get_item(self.item_id)
+            if item:
+                # relative_path holds the raw torrent name (e.g., Reacher.S02) rather than just "Reacher"
+                search_target = item.relative_path if getattr(item, 'relative_path', None) else self.target_title
+                explicit_season = str(getattr(item, 'season', ''))
+        except Exception:
+            pass
+
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            # We don't want to crash if we don't have connection info during testing
             if not host or not user or not password:
                 return
                 
             client.connect(hostname=host, username=user, password=password, timeout=5.0)
 
-            # Reusing the original SQLite remote query script
+            # Reusing the original SQLite remote query script with strict Python filtering
             remote_script = f"""
 import sqlite3, json, os, glob, re, sys
 
-target_title = {repr(self.target_title)}
+target_title = {repr(search_target)}
+explicit_season = {repr(explicit_season)}
 remote_app_dir = {repr(remote_app_dir)}
 
 results = []
@@ -54,42 +66,71 @@ try:
     conn = sqlite3.connect(f'file:{{db_path}}?mode=ro', uri=True, timeout=10.0)
     cur = conn.cursor()
     
-    cur.execute("SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE path LIKE ? ORDER BY id DESC", ('%' + target_title + '%',))
+    # 1. Base words from the torrent name (ignoring tiny words, season/episode tags)
+    clean_target = target_title.replace('_', ' ').replace('.', ' ')
+    words = [w for w in re.split(r'\\W+', clean_target) if len(w) > 2]
+    words = [w for w in words if w.lower() not in ('season', 'episode')]
+    words = [w for w in words if not (w.isdigit() and len(w) == 4)]
+    
+    if not words:
+        words = [clean_target]
+        
+    # Fetch broadly first
+    query = "SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE " + " AND ".join(["path LIKE ?"] * len(words)) + " ORDER BY id DESC"
+    cur.execute(query, ['%' + w + '%' for w in words])
     rows = cur.fetchall()
     
-    if not rows:
-        # 1. Base extraction (ignoring tiny words to prevent false positives)
-        words = [w for w in re.split(r'\\W+', target_title) if len(w) > 2]
-        words = [w for w in words if w.lower() not in ('season', 'episode')]
-        # Filter out 4-digit years (e.g., 2008)
-        words = [w for w in words if not (w.isdigit() and len(w) == 4)]
+    # 2. Extract expected Season and Episode
+    s_num = None
+    e_num = None
+    
+    # Prioritize the explicitly chosen season from the UI Dropdown
+    if explicit_season:
+        ex_s_match = re.search(r'\d+', str(explicit_season))
+        if ex_s_match:
+            s_num = int(ex_s_match.group())
         
-        # 2. Smart TV Show detection (looks for "Season X Episode Y" or "SXXEYY")
-        se_match = re.search(r'(?i)(?:season\\s*0*(\\d+)|s0*(\\d+)).*?(?:episode\\s*0*(\\d+)|e0*(\\d+))', target_title)
-        
-        if se_match:
+    se_match = re.search(r'(?i)(?:season\\s*0*(\\d+)|s0*(\\d+))(?:.*?(?:episode\\s*0*(\\d+)|e0*(\\d+)))?', clean_target)
+    if se_match:
+        if s_num is None:
             s_num = int(se_match.group(1) or se_match.group(2))
+        if se_match.group(3) or se_match.group(4):
             e_num = int(se_match.group(3) or se_match.group(4))
-            # Append strict scene formatting (e.g., 's02e05')
-            words.append(f"s{s_num:02d}e{e_num:02d}")
             
-        if words:
-            query = "SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE " + " AND ".join(["path LIKE ?"] * len(words)) + " ORDER BY id DESC"
-            cur.execute(query, ['%' + w + '%' for w in words])
-            rows = cur.fetchall()
+    filtered_rows = []
+    
+    # 3. Apply strict Python Filtering to lock it to the right season
+    if s_num is not None:
+        for r in rows:
+            path_str = r[2].lower()
+            path_se = re.search(r'(?i)(?:season\\s*0*(\\d+)|s0*(\\d+))(?:.*?(?:episode\\s*0*(\\d+)|e0*(\\d+)))?', path_str)
             
-            # 3. Post-filter for non-TV show movies that have numbers (e.g. "Kill Bill 2")
-            if not se_match:
-                digits = [w for w in re.split(r'\\W+', target_title) if w.isdigit() and len(w) <= 2]
-                if digits:
-                    filtered_rows = []
-                    for r in rows:
-                        # Extract standalone numbers from the path to prevent '2' from matching 'x264'
-                        path_nums = [n for n in re.split(r'\\W+', r[2]) if n.isdigit()]
-                        if all((d in path_nums or f"{int(d):02d}" in path_nums) for d in digits):
+            if path_se:
+                p_s = int(path_se.group(1) or path_se.group(2))
+                p_e = None
+                if path_se.group(3) or path_se.group(4):
+                    p_e = int(path_se.group(3) or path_se.group(4))
+                    
+                # The file MUST belong to the requested season to pass
+                if p_s == s_num:
+                    if e_num is not None:
+                        if p_e == e_num:
                             filtered_rows.append(r)
-                    rows = filtered_rows
+                    else:
+                        filtered_rows.append(r)
+    else:
+        # Non-TV filtering for movie sequels
+        digits = [w for w in re.split(r'\\W+', clean_target) if w.isdigit() and len(w) <= 2]
+        if digits:
+            for r in rows:
+                path_nums = [n for n in re.split(r'\\W+', r[2]) if n.isdigit()]
+                if all((d in path_nums or f"{{int(d):02d}}" in path_nums) for d in digits):
+                    filtered_rows.append(r)
+        else:
+            filtered_rows = rows
             
+    rows = filtered_rows
+    
     unique_jobs = {{}}
     for db_status, stage_flags, db_path in rows:
         if db_path not in unique_jobs:
