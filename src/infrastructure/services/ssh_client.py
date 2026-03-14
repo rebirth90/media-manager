@@ -58,16 +58,37 @@ try:
     rows = cur.fetchall()
     
     if not rows:
-        # Improved keyword extraction: exclude years and common metadata words
+        # 1. Base extraction (ignoring tiny words to prevent false positives)
         words = [w for w in re.split(r'\\W+', target_title) if len(w) > 2]
         words = [w for w in words if w.lower() not in ('season', 'episode')]
         # Filter out 4-digit years (e.g., 2008)
         words = [w for w in words if not (w.isdigit() and len(w) == 4)]
         
+        # 2. Smart TV Show detection (looks for "Season X Episode Y" or "SXXEYY")
+        se_match = re.search(r'(?i)(?:season\\s*0*(\\d+)|s0*(\\d+)).*?(?:episode\\s*0*(\\d+)|e0*(\\d+))', target_title)
+        
+        if se_match:
+            s_num = int(se_match.group(1) or se_match.group(2))
+            e_num = int(se_match.group(3) or se_match.group(4))
+            # Append strict scene formatting (e.g., 's02e05')
+            words.append(f"s{s_num:02d}e{e_num:02d}")
+            
         if words:
             query = "SELECT status, COALESCE(stage_results, '{{}}'), path FROM jobs WHERE " + " AND ".join(["path LIKE ?"] * len(words)) + " ORDER BY id DESC"
             cur.execute(query, ['%' + w + '%' for w in words])
             rows = cur.fetchall()
+            
+            # 3. Post-filter for non-TV show movies that have numbers (e.g. "Kill Bill 2")
+            if not se_match:
+                digits = [w for w in re.split(r'\\W+', target_title) if w.isdigit() and len(w) <= 2]
+                if digits:
+                    filtered_rows = []
+                    for r in rows:
+                        # Extract standalone numbers from the path to prevent '2' from matching 'x264'
+                        path_nums = [n for n in re.split(r'\\W+', r[2]) if n.isdigit()]
+                        if all((d in path_nums or f"{int(d):02d}" in path_nums) for d in digits):
+                            filtered_rows.append(r)
+                    rows = filtered_rows
             
     unique_jobs = {{}}
     for db_status, stage_flags, db_path in rows:
