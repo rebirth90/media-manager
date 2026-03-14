@@ -876,13 +876,26 @@ class SeriesCardWidget(QWidget):
         self.prog_bar_dl.setValue(int(prog_val * 100))
 
     def _ensure_episode_row(self, rel_path: str, tmdb_episodes: dict = None):
-        if rel_path in self.episodes_map:
-            row = self.episodes_map[rel_path]
-            match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', rel_path)
-            if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
-            ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
-            
-            if ep_num and tmdb_episodes:
+        # 1. Extract ep_num immediately
+        match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', rel_path)
+        if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
+        ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
+        
+        if ep_num is None:
+            return None
+
+        # 2. Prevent Duplicates: Check if we already have this episode row
+        row = self.episodes_map.get(rel_path)
+        if not row:
+            for existing_path, widget in self.episodes_map.items():
+                if getattr(widget, 'ep_num', None) == ep_num:
+                    row = widget
+                    self.episodes_map[rel_path] = row # Map the new path (telemetry) to the existing widget
+                    break
+                    
+        if row:
+            # We found an existing row, just update its TMDB data if available
+            if tmdb_episodes:
                 ep_data = tmdb_episodes.get(ep_num) or tmdb_episodes.get(str(ep_num))
                 if ep_data:
                     ep_vote = ep_data.get('vote_average', '-')
@@ -895,19 +908,13 @@ class SeriesCardWidget(QWidget):
                     )
             return row
             
-        match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', rel_path)
-        if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
-        ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
-        
-        if ep_num is None:
-            return None
-        
+        # 3. If no row exists at all, create a brand new one
         display_title = os.path.basename(rel_path)
         desc = "No description available."
         still_url = ""
         
         ep_rating = "-"
-        if tmdb_episodes and ep_num:
+        if tmdb_episodes:
             ep_data = tmdb_episodes.get(ep_num) or tmdb_episodes.get(str(ep_num))
             if ep_data:
                 display_title = ep_data.get('name', display_title)
@@ -925,6 +932,7 @@ class SeriesCardWidget(QWidget):
             
         self.episodes_map[rel_path] = row
         
+        # 4. Insert in sorted order
         insert_idx = self.episodes_layout.count()
         for i in range(self.episodes_layout.count()):
             existing_widget = self.episodes_layout.itemAt(i).widget()
@@ -964,13 +972,13 @@ class SeriesCardWidget(QWidget):
                 ep_num = int(match.group(2)) if match and len(match.groups()) > 1 else (int(match.group(1)) if match else None)
                 
                 for qbit_path, widget in self.episodes_map.items():
-                    if os.path.basename(qbit_path) == fname:
-                        if ep_num is not None and getattr(widget, 'ep_num', None) == ep_num:
-                            row = widget
-                            break
-                        elif ep_num is None:
-                            row = widget
-                            break
+                    # FIX: Prioritize episode number matching over filename matching
+                    if ep_num is not None and getattr(widget, 'ep_num', None) == ep_num:
+                        row = widget
+                        break
+                    elif os.path.basename(qbit_path) == fname:
+                        row = widget
+                        break
                             
             if not row:
                 row = self._ensure_episode_row(path, getattr(self, '_cached_tmdb_eps', None))
