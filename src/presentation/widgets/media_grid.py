@@ -211,19 +211,17 @@ class MediaGridWidget(QWidget):
 
         q = query.lower().strip()
 
-        # Instant Visibility Toggle (Lazy Update)
         for flow in self.all_flows:
             title = flow.title_lbl.text().lower()
             matches_search = not q or q in title
-            matches_category = (category == "TV Series" and getattr(flow, 'media_type', 'movie') == 'tv-series') or \
-                               (category == "Movies" and getattr(flow, 'media_type', 'movie') == 'movie')
+            
+            # 1. Foolproof verification: check the literal Widget Class type
+            is_tv = isinstance(flow, SeriesCardWidget)
+            
+            matches_category = (category == "TV Series" and is_tv) or \
+                               (category == "Movies" and not is_tv)
             
             should_be_visible = matches_search and matches_category
-            if flow.isVisible() != should_be_visible:
-                # Disable layout updates temporarily to prevent massive recalculations
-                self.scroll_content.setUpdatesEnabled(False)
-                flow.setVisible(should_be_visible)
-
-        # Defer layout recalculation until next event loop tick to prevent UI hang
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(0, lambda: self.scroll_content.setUpdatesEnabled(True))
+            
+            # 2. Force the visibility state strictly (No IF checks, no layout pausing)
+            flow.setVisible(should_be_visible)
