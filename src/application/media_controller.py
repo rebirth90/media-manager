@@ -118,6 +118,9 @@ class MediaController(QObject):
                     final_title = resolved_title
                     if s_num and f"Season {s_num}" not in resolved_title:
                         final_title = f"{resolved_title} - Season {s_num}"
+                    
+                    # Store title directly to DB
+                    self.repo.update_item_title(idx, final_title)
                     self.title_resolved.emit(idx, final_title)
                 
                 fetcher.title_resolved.connect(on_title_resolved)
@@ -127,6 +130,16 @@ class MediaController(QObject):
                     img = details.get("image_url") or image_url
                     if img:
                         self.fetch_image(idx, img)
+                        self.repo.update_item_image_url(idx, img)
+                    
+                    # Store metadata directly to DB to skip future fetches
+                    from src.application.use_cases.sync_use_cases import UpdateMetadataUseCase
+                    UpdateMetadataUseCase(self.repo).execute(
+                        idx, 
+                        details.get("description", ""), 
+                        details.get("genre", ""), 
+                        details.get("rating", "")
+                    )
                 
                 fetcher.details_resolved.connect(handle_details)
                 
@@ -140,6 +153,10 @@ class MediaController(QObject):
                 logger.error(f"Error starting TMDB resolution for {title}: {e}")
                 self.title_resolved.emit(flow_index, title)
         else:
+            # Check if this existing item needs a metadata backfill
+            existing_item = self.repo.get_item(flow_index)
+            needs_metadata_backfill = existing_item and (not existing_item.description or not existing_item.genre)
+
             if is_restored and media_type == 'tv-series':
                 season_num = None
                 _, parsed_s, _ = parse_tv_title(title)
@@ -162,6 +179,29 @@ class MediaController(QObject):
                 
                 if season_num and tmdb_id:
                     self.request_season_episodes(flow_index, tmdb_id, season_num)
+
+            # Backfill TMDB Metadata if missing on an existing item
+            if is_restored and needs_metadata_backfill:
+                if not tmdb_id:
+                    tmdb_id = self.repo.recover_tmdb_id_by_title(title)
+                
+                if tmdb_id:
+                    logger.info(f"Backfilling missing TMDB metadata for existing item: {title}")
+                    fetcher = TMDBFetcherThread(self.repo, tmdb_id, media_type, self)
+                    
+                    def handle_details_backfill(details, idx=flow_index):
+                        self.details_resolved.emit(idx, details)
+                        from src.application.use_cases.sync_use_cases import UpdateMetadataUseCase
+                        UpdateMetadataUseCase(self.repo).execute(
+                            idx, 
+                            details.get("description", ""), 
+                            details.get("genre", ""), 
+                            details.get("rating", "")
+                        )
+                    
+                    fetcher.details_resolved.connect(handle_details_backfill)
+                    self._threads.append(fetcher)
+                    fetcher.start()
 
             if image_url:
                 self.fetch_image(flow_index, image_url)
@@ -204,6 +244,22 @@ class MediaController(QObject):
             logger.error(f"Failed to delete torrents {hashes}: {e}")
 
     def start_ssh_telemetry(self, flow_index: int, target_title: str):
+        # 1. Check if the item is already completely converted in the DB
+        item = self.repo.get_item(flow_index)
+        if item and item.conversion_data:
+            try:
+                import json
+                c_data = json.loads(item.conversion_data)
+                # If it's a list of jobs (episodes/movies) and ALL are completed
+                if c_data and isinstance(c_data, list) and all(r.get("db_status", "").upper() == "COMPLETED" for r in c_data):
+                    logger.info(f"Item '{target_title}' is already fully converted. Skipping SSH telemetry.")
+                    from src.application.events import event_bus
+                    event_bus.conversion_updated_signal.emit(flow_index)
+                    return
+            except Exception:
+                pass
+
+        # 2. Start normal telemetry if not completed
         logger.info(f"Initializing SSH telemetry for: {target_title}")
         from src.application.use_cases.sync_use_cases import SyncConversionStateUseCase
         sync_uc = SyncConversionStateUseCase(self.repo)

@@ -117,6 +117,17 @@ class QBittorrentPollingThread(QThread):
                 for item in media_items:
                     t_data = item.torrent_data
                     t_info = json.loads(t_data) if t_data else {}
+                    
+                    # Prevent redundant qBittorrent processing if already completed
+                    if t_info.get("human_state") == "Completed":
+                        # SAFETY CHECK: If it's a TV season, we MUST have the 'files' payload before we can safely stop polling.
+                        if item.is_season and "files" not in t_info:
+                            pass 
+                        else:
+                            # Fully cached. Emit DB state directly and skip API evaluation
+                            self.sync_use_case.execute(item.id, t_data)
+                            continue
+                    
                     current_hash = t_info.get("hash", "")
                     expected_name = t_info.get("name", "")
                     
