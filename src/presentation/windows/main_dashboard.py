@@ -179,7 +179,9 @@ class MainDashboard(QMainWindow):
                     relative_path=relative_path,
                     torrent_bytes=torrent_bytes, 
                     image_url=img_url, 
-                    is_restored=False
+                    is_restored=False,
+                    media_type=media_type,
+                    season=season
                 )
                 
                 self.media_grid.filter_items(self.header_nav.get_search_query(), "TV Series" if self.header_nav.is_tv_series_selected() else "Movies")

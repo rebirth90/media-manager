@@ -157,7 +157,7 @@ class MediaController(QObject):
             existing_item = self.repo.get_item(flow_index)
             needs_metadata_backfill = existing_item and (not existing_item.description or not existing_item.genre)
 
-            if is_restored and media_type == 'tv-series':
+            if media_type == 'tv-series': # <-- FIX IMPLEMENTED HERE: removed `is_restored and `
                 season_num = None
                 _, parsed_s, _ = parse_tv_title(title)
                 if parsed_s: season_num = parsed_s
@@ -181,7 +181,7 @@ class MediaController(QObject):
                     self.request_season_episodes(flow_index, tmdb_id, season_num)
 
             # Backfill TMDB Metadata if missing on an existing item
-            if is_restored and needs_metadata_backfill:
+            if needs_metadata_backfill: # <-- FIX IMPLEMENTED HERE: removed `is_restored and `
                 if not tmdb_id:
                     tmdb_id = self.repo.recover_tmdb_id_by_title(title)
                 

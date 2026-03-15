@@ -83,12 +83,6 @@ class QBittorrentPollingThread(QThread):
         self.port = os.getenv("QBIT_PORT")
 
     def run(self) -> None:
-        try:
-            client = qbittorrentapi.Client(host=f"http://{self.host}:{self.port}", username=os.getenv("QBIT_USER"), password=os.getenv("QBIT_PASS"))
-            client.auth_log_in()
-        except:
-            return
-
         QBIT_STATE_MAP = {
             "downloading":          ("Downloading",   "PillDownloading", "PbActive"),
             "stalledDL":            ("Stalled",       "PillDownloading", "PbActive"),
@@ -100,8 +94,19 @@ class QBittorrentPollingThread(QThread):
             "error":                ("Error",         "PillDanger",      "PbUnknown"),
         }
 
+        client = None
+
         while self.active:
             try:
+                # 1. Self-healing connection. Re-authenticate if client is None
+                if not client:
+                    client = qbittorrentapi.Client(
+                        host=f"http://{self.host}:{self.port}", 
+                        username=os.getenv("QBIT_USER"), 
+                        password=os.getenv("QBIT_PASS")
+                    )
+                    client.auth_log_in()
+
                 torrents = client.torrents_info()
                 media_items = self.repo.get_all_items()
 
@@ -194,9 +199,15 @@ class QBittorrentPollingThread(QThread):
                         self.sync_use_case.execute(item.id, json.dumps(t_info))
                         
             except Exception as e:
-                pass
+                # If connection fails, set client to None so it tries to log in again next loop
+                client = None
+                print(f"[QBitTracker] Polling cycle failed, will retry: {str(e)}")
                 
-            QThread.sleep(2)
+            # 2. Responsive sleeping: Sleep in 100ms chunks to allow instant thread termination
+            for _ in range(20):
+                if not self.active:
+                    break
+                self.msleep(100)
 
     def stop(self):
         self.active = False
