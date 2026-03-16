@@ -1,11 +1,10 @@
 import sys
 import math
 import json
-import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QFrame, QScrollArea, QLayout, QSizePolicy, QGraphicsOpacityEffect)
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QPolygonF
-from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QPointF, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QSize, pyqtSignal
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 
@@ -233,6 +232,7 @@ class ConversionFlowViewer(QWidget):
         self._is_revealed = False
         self._pending_json = None
         self._forced_h = 500
+        self._foldout_reveal_attempts = 0
 
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
@@ -291,6 +291,54 @@ class ConversionFlowViewer(QWidget):
         
         # Failsafe reveal in case loadFinished is dropped during rapid WebEngine initialization
         QTimer.singleShot(3000, self._failsafe_reveal)
+
+    def show_foldout_loading(self, text: str = "Loading conversion chart...") -> None:
+        """Show an inline loading placeholder while the foldout settles its final size."""
+        self.lbl_loading.setText(text)
+        self.loading_container.show()
+        self._view.hide()
+        self.setMinimumHeight(150)
+        self.setMaximumHeight(150)
+        self._foldout_reveal_attempts = 0
+        self.pulse_anim.start()
+
+    def reveal_after_foldout_expand(self, delay_ms: int = 160) -> None:
+        """Reveal the chart only after foldout expansion to prevent half-size first paint."""
+        if not self._page_loaded:
+            self.show_foldout_loading()
+            return
+        QTimer.singleShot(max(0, int(delay_ms)), self._reveal_after_foldout_expand)
+
+    def _reveal_after_foldout_expand(self) -> None:
+        host_w = self.width()
+        if host_w < 500:
+            parent = self.parentWidget()
+            if parent:
+                host_w = max(host_w, parent.width())
+
+        if host_w < 500 and self._foldout_reveal_attempts < 8:
+            self._foldout_reveal_attempts += 1
+            QTimer.singleShot(100, self._reveal_after_foldout_expand)
+            return
+
+        self._is_revealed = True
+        self.pulse_anim.stop()
+
+        w = host_w if host_w > 100 else 1000
+        zoom = w / 2440.0 if w < 2440.0 else 1.0
+        target_h = int(620.0 * zoom)
+        self._forced_h = max(target_h, 380)
+
+        self._view.setZoomFactor(zoom)
+        self._view.setFixedHeight(self._forced_h)
+        self.setMinimumHeight(self._forced_h)
+        self.setMaximumHeight(self._forced_h)
+
+        self.loading_container.hide()
+        self._view.show()
+        self.opacity_effect.setOpacity(1.0)
+        self.height_calculated.emit(self._forced_h)
+        self.refresh_pipeline()
         
     def _failsafe_reveal(self):
         if not self._page_loaded:
@@ -325,8 +373,8 @@ class ConversionFlowViewer(QWidget):
         # Calculate final mathematical height synchronously
         w = host_w if host_w > 100 else 1000
         zoom = w / 2440.0 if w < 2440.0 else 1.0
-        target_h = int(750.0 * zoom)
-        self._forced_h = max(target_h, 500)
+        target_h = int(620.0 * zoom)
+        self._forced_h = max(target_h, 380)
         
         self._view.setZoomFactor(zoom)
         self._view.setFixedHeight(self._forced_h)
@@ -366,7 +414,7 @@ class ConversionFlowViewer(QWidget):
         css = """
         const style = document.createElement('style');
         style.innerHTML = `
-            #page { min-height: 750px !important; padding-bottom: 120px !important; }
+            #page { min-height: 0 !important; padding-bottom: 0 !important; }
             
             @keyframes flowAnim { 
                 from { stroke-dashoffset: 15; }
@@ -436,10 +484,10 @@ class ConversionFlowViewer(QWidget):
         self._view.page().runJavaScript(css)
 
     def sizeHint(self):
-        return QSize(2440, 750)
+        return QSize(2440, 620)
         
     def minimumSizeHint(self):
-        return QSize(800, 500)
+        return QSize(800, 380)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -450,8 +498,8 @@ class ConversionFlowViewer(QWidget):
 
         w = self.width()
         zoom = w / 2440.0 if w < 2440.0 else 1.0
-        target_h = int(750.0 * zoom)
-        self._forced_h = max(target_h, 500)
+        target_h = int(620.0 * zoom)
+        self._forced_h = max(target_h, 380)
         
         self.setMinimumHeight(self._forced_h)
         self.setMaximumHeight(self._forced_h)

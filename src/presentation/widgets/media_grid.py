@@ -1,6 +1,6 @@
 import json
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QGraphicsOpacityEffect
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QSequentialAnimationGroup
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 
 from src.application.events import event_bus
 from src.domain.repositories import IMediaRepository
@@ -118,7 +118,9 @@ class MediaGridWidget(QWidget):
                     prog_val=t_info.get("prog_val", 0.0),
                     size_str=t_info.get("size_str", "0 B"),
                     speed_str=t_info.get("speed_str", "0.0 MB/s"),
-                    active_state_str=t_info.get("active_state_str", "")
+                    active_state_str=t_info.get("active_state_str", ""),
+                    hash_val=t_info.get("hash", ""),
+                    raw_size_bytes=t_info.get("raw_size_bytes", 0),
                 )
                 if t_info.get("prog_val", 0.0) >= 1.0:
                     torrent_completed = True
@@ -194,7 +196,9 @@ class MediaGridWidget(QWidget):
                 prog_val=t_info.get("prog_val", 0.0),
                 size_str=t_info.get("size_str", "0 B"),
                 speed_str=t_info.get("speed_str", "0.0 MB/s"),
-                active_state_str=t_info.get("active_state_str", "")
+                active_state_str=t_info.get("active_state_str", ""),
+                hash_val=t_info.get("hash", ""),
+                raw_size_bytes=t_info.get("raw_size_bytes", 0),
             )
             if t_info.get("prog_val", 0.0) >= 1.0:
                 flow.torrent_completed = True
@@ -205,7 +209,20 @@ class MediaGridWidget(QWidget):
             # Populate episode rows when file list first arrives for TV series
             cached_files = t_info.get("files", [])
             if cached_files and hasattr(flow, 'populate_episodes_from_files'):
-                if not getattr(flow, '_cached_files', None):
+                existing_cached = getattr(flow, '_cached_files', None) or []
+
+                def _has_sizes(file_list):
+                    if not isinstance(file_list, list) or not file_list:
+                        return False
+                    return all(isinstance(f, dict) and ('size' in f) for f in file_list)
+
+                should_repopulate = (
+                    not existing_cached
+                    or (_has_sizes(cached_files) and not _has_sizes(existing_cached))
+                    or (len(cached_files) != len(existing_cached))
+                )
+
+                if should_repopulate:
                     flow._cached_files = cached_files
                     tmdb_eps = getattr(flow, '_cached_tmdb_eps', None)
                     flow.populate_episodes_from_files(cached_files, tmdb_eps)

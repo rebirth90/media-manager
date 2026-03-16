@@ -122,19 +122,32 @@ class MainDashboard(QMainWindow):
             self._fade_out_overlay()
             return
 
+        waited_ms = 0
+        max_wait_ms = 20000
+
         def poll_ready():
+            nonlocal waited_ms
+            waited_ms += 150
+
             rendered_ids = {getattr(f, 'db_id', None) for f in self.media_grid.all_flows}
             if not expected_ids.issubset(rendered_ids):
-                QTimer.singleShot(250, poll_ready)
+                if waited_ms >= max_wait_ms:
+                    self._fade_out_overlay()
+                    return
+                QTimer.singleShot(150, poll_ready)
                 return
 
             if all(self._is_flow_render_ready(item_id) for item_id in expected_ids):
                 self._fade_out_overlay()
                 return
 
-            QTimer.singleShot(250, poll_ready)
+            if waited_ms >= max_wait_ms:
+                self._fade_out_overlay()
+                return
 
-        QTimer.singleShot(250, poll_ready)
+            QTimer.singleShot(150, poll_ready)
+
+        QTimer.singleShot(150, poll_ready)
 
     def _apply_modal_blur(self):
         self._modal_blur_locks += 1
@@ -168,20 +181,9 @@ class MainDashboard(QMainWindow):
 
         if item.conversion_data:
             flowchart = getattr(flow, 'flowchart_view', None)
-            if not flowchart or not getattr(flowchart, '_page_loaded', False):
+            # Only gate startup on the card-level chart. Episode-level charts initialize lazily.
+            if flowchart and not getattr(flowchart, '_page_loaded', False):
                 return False
-
-            # Ensure nested episode flowcharts are also initialized when present.
-            episode_map = getattr(flow, 'episodes_map', {}) or {}
-            seen_rows = set()
-            for row in episode_map.values():
-                row_id = id(row)
-                if row_id in seen_rows:
-                    continue
-                seen_rows.add(row_id)
-                ep_chart = getattr(row, 'flowchart_view', None)
-                if ep_chart and not getattr(ep_chart, '_page_loaded', False):
-                    return False
 
         return True
 

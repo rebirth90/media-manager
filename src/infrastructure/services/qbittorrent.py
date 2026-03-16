@@ -6,7 +6,6 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from src.domain.repositories import IMediaRepository
 from src.application.use_cases.sync_use_cases import SyncTorrentStateUseCase
 from src.utils.formatting import format_size, format_speed
-from src.application.events import event_bus
 
 class QBittorrentClient(QThread):
     finished = pyqtSignal(str)
@@ -64,8 +63,18 @@ class QBittorrentFilesWorker(QThread):
         try:
             client = qbittorrentapi.Client(host=f"http://{host}:{port}", username=os.getenv("QBIT_USER"), password=os.getenv("QBIT_PASS"))
             client.auth_log_in()
-            files = client.torrents_files(torrent_hash=self.torrent_hash)
-            self.finished.emit(files)
+            raw_files = client.torrents_files(torrent_hash=self.torrent_hash)
+            normalized_files = []
+            for f in raw_files:
+                try:
+                    size_val = f.get("size", 0)
+                except Exception:
+                    size_val = 0
+                normalized_files.append({
+                    "name": f.get("name", ""),
+                    "size": int(size_val or 0),
+                })
+            self.finished.emit(normalized_files)
         except Exception as e:
             self.error.emit(f"Fetch Files Failed: {str(e)}")
 
@@ -125,29 +134,62 @@ class QBittorrentPollingThread(QThread):
                     
                     # Prevent redundant qBittorrent processing if already completed
                     if t_info.get("human_state") == "Completed":
-                        # SAFETY CHECK: If it's a TV season, we MUST have the 'files' payload before we can safely stop polling.
-                        if item.is_season and "files" not in t_info:
-                            pass 
-                        else:
-                            # Fully cached. Emit DB state directly and skip API evaluation
+                        # Always reconcile season packs against live qB state.
+                        # A stale-but-sized cache can still point to the wrong torrent snapshot.
+                        if not item.is_season:
+                            # Fully cached movie. Emit DB state directly and skip API evaluation.
                             self.sync_use_case.execute(item.id, t_data)
                             continue
                     
                     current_hash = t_info.get("hash", "")
                     expected_name = t_info.get("name", "")
+
+                    expected_season = None
+                    if item.is_season:
+                        try:
+                            season_raw = str(getattr(item, 'season', '') or '')
+                            season_digits = ''.join(ch for ch in season_raw if ch.isdigit())
+                            if season_digits:
+                                expected_season = int(season_digits)
+                        except Exception:
+                            expected_season = None
+
+                    def _season_matches(torrent_obj) -> bool:
+                        if expected_season is None:
+                            return True
+                        t_name = str(torrent_obj.get('name', '')).lower()
+                        tokens = (
+                            f"s{expected_season:02d}",
+                            f"season {expected_season}",
+                            f"season{expected_season}",
+                        )
+                        return any(tok in t_name for tok in tokens)
                     
                     matched_t = None
                     if current_hash:
                         matched_t = next((t for t in torrents if t.get('hash') == current_hash), None)
+                        if matched_t and not _season_matches(matched_t):
+                            matched_t = None
                     if not matched_t and expected_name:
                         matched_t = next((t for t in torrents if t.get('name') == expected_name), None)
+                        if matched_t and not _season_matches(matched_t):
+                            matched_t = None
                     if not matched_t:
                         target_suffix = item.relative_path.replace("\\", "/")
                         candidates = []
                         for t in torrents:
                             sp = t.get('save_path', '').replace("\\", "/")
-                            if (sp.endswith(target_suffix) or target_suffix in sp) and t.get('hash') not in known_hashes:
+                            # Do not block by known_hashes here: stale DB mappings can otherwise never self-heal.
+                            if (sp.endswith(target_suffix) or target_suffix in sp) and _season_matches(t):
                                 candidates.append(t)
+
+                        # If no season-aware candidate is found, fallback to path-only candidates.
+                        if not candidates:
+                            for t in torrents:
+                                sp = t.get('save_path', '').replace("\\", "/")
+                                if sp.endswith(target_suffix) or target_suffix in sp:
+                                    candidates.append(t)
+
                         if candidates:
                             candidates.sort(key=lambda x: x.get('added_on', 0), reverse=True)
                             matched_t = candidates[0]
@@ -182,16 +224,29 @@ class QBittorrentPollingThread(QThread):
                             "pill_class": pill_class,
                             "pb_style": pb_style,
                             "prog_val": prog_val,
+                            "raw_size_bytes": int(raw_size or 0),
                             "size_str": format_size(raw_size),
                             "speed_str": format_speed(dlspeed),
                             "active_state_str": active_state_str
                         })
                         
-                        # Fetch file list once for TV series to enable episode rows
-                        if item.is_season and "files" not in t_info and new_hash:
+                        # Fetch file list (with sizes) for TV series to enable accurate episode rows
+                        cached_files = t_info.get("files", [])
+                        files_need_refresh = (
+                            not isinstance(cached_files, list)
+                            or not cached_files
+                            or any(not isinstance(f, dict) or "size" not in f for f in cached_files)
+                        )
+                        if item.is_season and files_need_refresh and new_hash:
                             try:
                                 raw_files = client.torrents_files(torrent_hash=new_hash)
-                                t_info["files"] = [{"name": f.get("name", "")} for f in raw_files]
+                                t_info["files"] = [
+                                    {
+                                        "name": f.get("name", ""),
+                                        "size": int(f.get("size", 0) or 0),
+                                    }
+                                    for f in raw_files
+                                ]
                             except:
                                 pass
                         

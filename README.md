@@ -1,84 +1,141 @@
 # Media Manager
 
-A modern, enterprise-grade media management application for automating torrent downloads, FFmpeg encoding, and media organization workflows. 
+Media Manager is a PyQt6 desktop app for managing torrent-driven media workflows end to end:
 
-## ✨ UI Redesign - Gemini Mockup Implementation (February 2026)
+- ingest and monitor torrents from qBittorrent
+- enrich media with TMDB and IMDb-backed metadata
+- track encoding/telemetry states
+- inspect conversion pipeline visuals and logs per item
 
-The application has been **completely redesigned** to match a professional, polished mockup design:
+## Current Capabilities
 
-### 🎨 Visual Highlights
-- **Modern Card Layout**: Soft blue-gray gradients with floating white content cards.
-- **Refined Typography**: Enhanced font hierarchy with Segoe UI.
-- **Status Visualization**: Color-coded workflow states with glow effects
-  - 🔵 **Blue**: Initializing/Download
-  - 🟡 **Amber**: Processing/Encoding
-  - 🟢 **Green**: Complete/Success
-  - 🔴 **Red**: Errors
-- **Professional Polish**: Subtle shadows, rounded corners, smooth hover effects.
-- **Clear Workflow**: Visual arrows connecting Start → Edit → Approve stages.
+### Torrent and Progress Pipeline
+- qBittorrent integration for torrent state, speed, and size polling.
+- qBittorrent is treated as source of truth for initial size values.
+- Base-10 size formatting (B/KB/MB/GB/TB, divide by 1000) to match qBittorrent display.
+- Separate progress handling for movie cards, season cards, and episode rows.
 
-### 🎯 Key Improvements
-**Main Window**:
-- Frameless application window with custom drag-to-move interactions and custom title bar controls.
-- Startup loading overlay with smooth alpha fade-out animations for a polished boot experience.
-- Enhanced navigation bar with refined pill buttons and Movies/TV-Series toggle filtering.
-- Card-based content container with subtle transparency.
+### Movie and TV Handling
+- Automatic title parsing for Movie vs TV season content.
+- Episode row generation from torrent file listings.
+- Episode-to-file mapping so each episode can track its own qBittorrent size and telemetry.
+- TMDB metadata enrichment and image loading for movies and episodes.
+- IMDb fallback path when TMDB ID discovery cannot be resolved directly.
 
-**Modal Dialogs**:
-- Split-pane layout (Workflow Status / Content Details).
-- Dynamic background blur effects dynamically applied to the main grid when modals are open.
+### Foldout Insights and Logs
+- Expandable foldouts for conversion details.
+- Inline summary metrics:
+   - initial size
+   - final size and percentage delta
+   - total conversion minutes
+- Quick-open buttons for general and FFmpeg logs when conversion is completed.
+- Conversion flowchart per card with delayed reveal on expand to prevent half-size chart paint.
 
-## Features
+### UI and Interaction
+- Custom card-based UI with movie and TV filtering.
+- Foldout expand/collapse animations with adaptive height sync.
+- Startup loading overlay.
+- Blur-aware modal interactions that collapse open foldouts before dialog flows.
+- Embedded browser modal for Filelist-style torrent browsing and metadata extraction.
 
-### Automated Workflow
-1. **Download Stage** (▶ Start Project)
-   - Torrent management via qBittorrent integration, treating the qBittorrent server as the source of truth for progress.
-   - Background polling updates UI progress pills and download speeds in real-time.
-   - Automatic categorization parsing (Movies/TV-Series) based on torrent title metadata.
-2. **Encoding Stage** (✎ Edit Content)
-   - FFmpeg-based video encoding.
-   - SSH telemetry for remote processing.
-3. **Approval Stage** (✔ Approve & Share)
-   - Final review and approval.
+### Architecture and Services
+- DDD layering across `domain`, `application`, `infrastructure`, and `presentation`/`ui`.
+- Signal-driven updates across worker threads and UI.
+- Local FastAPI service bootstrapped with the desktop app runtime.
+- SQLite-backed persistence for media and telemetry snapshots.
+- SSH support for remote telemetry/log access scenarios.
 
-### Rich Metadata Management
-- **Automated Metadata Discovery**: Integrates with the TMDB API to fetch high-quality metadata based on media titles.
-- **Robust Fallbacks**: Automatically queries the IMDB API if TMDB ID matching fails to resolve correctly.
-- **Content Enrichment**: Pulls in localized titles, release years, genres, descriptions, user ratings, and downloads high-resolution posters.
+## Project Layout
 
-### Advanced TV Series Support
-- **Automatic Season Parsing**: Intelligent parsing of torrent titles to detect seasons and label media types.
-- **Episode Tracking**: Fetches episode-level data (stills, overviews, individual air dates) for active TV seasons.
-- **File Matching**: Queries qBittorrent for torrent file listings and intelligently maps video files to their corresponding TV episode rows.
+```text
+media-manager/
+   main.py
+   requirements.txt
+   start_app.bat
+   src/
+      application/
+      domain/
+      infrastructure/
+      presentation/
+      ui/
+   docs/
+      ARCHITECTURE.md
+   tests/
+```
 
-### UI Components
-- **Browser Modal**: Integrated web browser modal utilizing WebEngine for Filelist.io torrent browsing.
-- **Details Modal**: Deep dive into pipeline status, logs, and illustrations.
+## Requirements
 
-## Technology Stack
+- Python 3.8+
+- qBittorrent Web UI/API reachable from this machine
+- FFmpeg available in your processing environment
+- Optional: SSH target for remote telemetry flows
 
-### Core
-- **Python 3.x**: Main application language.
-- **PyQt6**: Modern Qt6 bindings for Python.
-- **qBittorrent API**: Torrent management.
-- **FFmpeg**: Video encoding and processing.
+Install dependencies:
 
-### Services
-- **FastAPI**: Backend API server.
-- **SSH**: Remote telemetry and monitoring.
-- **WebEngine**: Embedded browser for torrent selection.
-
-### Architecture
-- **Domain-Driven Design (DDD)**: Clean separation of domains spanning `presentation`, `application` (use cases), `domain` (entities like TorrentState, MediaItem, ConversionJob), and `infrastructure` (repositories, API clients).
-- **Event-driven**: Signal/slot communication pattern combined with an internal event bus.
-- **Threading**: Async download, tmdb fetchers, and encoding workers.
-
-## Installation
-
-### Prerequisites
 ```bash
-# Python 3.8 or higher
-python --version
-
-# Install dependencies
 pip install -r requirements.txt
+```
+
+## Environment Variables
+
+Create a `.env` file in the project root and configure the values your setup needs.
+
+### Core runtime
+- `SERVER_HOST` (example: `127.0.0.1`)
+- `LOCAL_PORT` (example: `9000`)
+
+### qBittorrent
+- `QBIT_HOST`
+- `QBIT_PORT`
+- `QBIT_USER`
+- `QBIT_PASS`
+
+### Metadata services
+- `TMDB_READ_ACCESS_TOKEN`
+
+### Optional provider auth
+- `FILELIST_USER`
+- `FILELIST_PASS`
+
+### Optional remote telemetry
+- `SSH_HOST`
+- `SSH_USER`
+- `SSH_PASS`
+- `REMOTE_APP_DIR`
+
+### Optional path config
+- `BASE_SCRATCH_PATH`
+
+## Run the App
+
+Option 1 (recommended on Windows):
+
+```bat
+start_app.bat
+```
+
+Option 2:
+
+```bash
+python main.py
+```
+
+## Testing
+
+Run all tests:
+
+```bash
+pytest
+```
+
+More test guidance is available in `TESTING.md`.
+
+## Documentation
+
+- Architecture: `docs/ARCHITECTURE.md`
+- Testing strategy: `TESTING.md`
+
+## Notes
+
+- Size displays are intentionally base-10 to align with qBittorrent UI values.
+- Foldout flowcharts use a brief inline loading state on expand when needed, then render at full computed size.

@@ -1,4 +1,3 @@
-import os
 from PyQt6.QtCore import Qt, pyqtProperty, pyqtSignal, QPropertyAnimation, QEasingCurve, QRectF
 from PyQt6.QtGui import QPainter, QColor, QFont, QPen, QPainterPath
 from PyQt6.QtWidgets import QWidget

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from src.domain.entities import MediaItem
 
 class IMediaRepository(ABC):

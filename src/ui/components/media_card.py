@@ -1,15 +1,15 @@
 import os
 import re
+import qbittorrentapi
 from datetime import datetime
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QSequentialAnimationGroup, QTimer, QUrl
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QColor, QPen, QDesktopServices
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QUrl
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QDesktopServices
 from PyQt6.QtCore import QRectF, QSize
 from PyQt6.QtWidgets import (
     QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QDialog,
-    QGraphicsOpacityEffect, QScrollArea
+    QScrollArea
 )
 
-from src.ui.dialogs.flow_details import FlowDetailsModal
 from src.ui.dialogs.delete_torrent import DeleteTorrentDialog
 from src.ui.conversion_flowchart import ConversionFlowViewer
 from src.infrastructure.services.image_downloader import ImageDownloaderThread
@@ -51,10 +51,25 @@ def _safe_float(value, default=0.0):
 def _format_size_bytes(num_bytes: int) -> str:
     size = float(max(0, _safe_int(num_bytes)))
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024.0 or unit == "TB":
+        # Match qBittorrent display units (SI/base-10).
+        if size < 1000.0 or unit == "TB":
             return f"{size:.2f} {unit}" if unit != "B" else f"{int(size)} B"
-        size /= 1024.0
+        size /= 1000.0
     return "0 B"
+
+
+def _format_size_text_two_decimals(size_text: str) -> str:
+    text = str(size_text or "").strip()
+    if not text:
+        return "0 B"
+    match = re.match(r'^\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z/]+)\s*$', text)
+    if not match:
+        return text
+    value = _safe_float(match.group(1), 0.0)
+    unit = match.group(2)
+    if unit.upper() == "B":
+        return f"{int(value)} B"
+    return f"{value:.2f} {unit}"
 
 
 def _minutes_from_general_log(log_path: str) -> float:
@@ -111,6 +126,7 @@ class MediaCardWidget(QFrame):
         self.flow_index = index
         self.relative_path = relative_path
         self._current_hash = hash_val
+        self._qbit_initial_size_bytes = 0
         self.db_id = db_id
         self.media_type = "movie"
         
@@ -191,6 +207,7 @@ class MediaCardWidget(QFrame):
         from src.ui.components.progress_pill import ProgressPillWidget
         self.prog_bar_dl = ProgressPillWidget()
         self.prog_bar_dl.set_data("Not Started", 0)
+        self.prog_bar_dl.setFixedSize(90, 24)
         pr_v.addWidget(self.prog_bar_dl)
         status_layout.addWidget(pr_container)
 
@@ -210,9 +227,10 @@ class MediaCardWidget(QFrame):
         cs_v.addWidget(self.lbl_conv_status)
         status_layout.addWidget(cs_container)
 
-        cp_container, cp_v = create_status_column("Conversion Progress", 130)
+        cp_container, cp_v = create_status_column("Conversion Progress", 90)
         from src.ui.components.progress_pill import ProgressPillWidget
         self.prog_pill_conv = ProgressPillWidget()
+        self.prog_pill_conv.setFixedSize(90, 24)
         cp_v.addWidget(self.prog_pill_conv)
         status_layout.addWidget(cp_container)
 
@@ -284,9 +302,10 @@ class MediaCardWidget(QFrame):
         self.btn_ffmpeg_log = QPushButton("FFmpeg log")
         for btn in (self.btn_general_log, self.btn_ffmpeg_log):
             btn.setObjectName("ActionIconButton")
-            btn.setMinimumHeight(30)
+            btn.setMinimumHeight(36)
+            btn.setMinimumWidth(112)
             btn.setIcon(QIcon(log_icon_path))
-            btn.setIconSize(QSize(16, 16))
+            btn.setIconSize(QSize(18, 18))
             btn.setEnabled(False)
         self.btn_general_log.clicked.connect(lambda: self._open_log_file(self._gen_log_local_path))
         self.btn_ffmpeg_log.clicked.connect(lambda: self._open_log_file(self._ff_log_local_path))
@@ -303,11 +322,48 @@ class MediaCardWidget(QFrame):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
 
+    def _resolve_movie_qbit_initial_size(self) -> int:
+        current_hash = str(getattr(self, '_current_hash', '') or '')
+        if not current_hash:
+            return 0
+        try:
+            host = os.getenv("QBIT_HOST")
+            port = os.getenv("QBIT_PORT")
+            user = os.getenv("QBIT_USER")
+            pwd = os.getenv("QBIT_PASS")
+            if not all([host, port, user, pwd]):
+                return 0
+
+            client = qbittorrentapi.Client(
+                host=f"http://{host}:{port}",
+                username=user,
+                password=pwd,
+            )
+            client.auth_log_in()
+            torrents = client.torrents_info()
+            matched = next((t for t in torrents if str(t.get("hash", "")) == current_hash), None)
+            if not matched:
+                return 0
+            raw_size = matched.get("total_size")
+            if raw_size is None:
+                raw_size = matched.get("size", 0)
+            return _safe_int(raw_size, 0)
+        except Exception:
+            return 0
+
     def _update_foldout_summary(self, telemetry: dict, db_status: str) -> None:
-        initial_size = _safe_int(telemetry.get("initial_size_bytes", 0))
+        # Source of truth: qBittorrent torrent size for movies.
+        initial_size = _safe_int(self._qbit_initial_size_bytes)
+        if initial_size <= 0:
+            initial_size = self._resolve_movie_qbit_initial_size()
+            if initial_size > 0:
+                self._qbit_initial_size_bytes = initial_size
         final_size = _safe_int(telemetry.get("final_size_bytes", 0))
         diff_pct = _safe_float(telemetry.get("size_diff_pct", 0.0))
         total_minutes = _safe_float(telemetry.get("conversion_total_minutes", 0.0))
+
+        if diff_pct == 0.0 and initial_size > 0 and final_size > 0:
+            diff_pct = round(((initial_size - final_size) / float(initial_size)) * 100.0, 2)
 
         self.lbl_initial_size.setText(f"Initial size: {_format_size_bytes(initial_size) if initial_size > 0 else '-'}")
         if initial_size > 0 and final_size > 0:
@@ -365,6 +421,7 @@ class MediaCardWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
+            self.flowchart_view.show_foldout_loading()
             summary_h = self._summary_height()
             if getattr(self.flowchart_view, '_is_revealed', False):
                 target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + summary_h + 20
@@ -374,7 +431,7 @@ class MediaCardWidget(QFrame):
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
                 self.foldout_container.setMaximumHeight(16777215)
-                self.flowchart_view.refresh_pipeline()
+                self.flowchart_view.reveal_after_foldout_expand()
                 restore_updates()
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -441,13 +498,21 @@ class MediaCardWidget(QFrame):
         self.lbl_foldout_desc.setText(desc)
         self.lbl_foldout_genre_rating.setText(f"Genre: {genre} | Rating: ★ {rating}")
 
-    def update_torrent_ui(self, human_state, pill_class, pb_style, prog_val, size_str, speed_str, active_state_str):
+    def update_torrent_ui(self, human_state, pill_class, pb_style, prog_val, size_str, speed_str, active_state_str, hash_val: str = "", raw_size_bytes: int = 0):
+        if hash_val:
+            self._current_hash = hash_val
+        if _safe_int(raw_size_bytes) > 0:
+            self._qbit_initial_size_bytes = _safe_int(raw_size_bytes)
+
         self.lbl_state_val.setText(human_state)
         self.lbl_state_val.setProperty("class", pill_class)
         self.lbl_state_val.style().unpolish(self.lbl_state_val)
         self.lbl_state_val.style().polish(self.lbl_state_val)
             
-        self.lbl_size_val.setText(size_str)
+        if self._qbit_initial_size_bytes > 0:
+            self.lbl_size_val.setText(_format_size_bytes(self._qbit_initial_size_bytes))
+        else:
+            self.lbl_size_val.setText(_format_size_text_two_decimals(size_str))
         self.prog_bar_dl.set_data(human_state, int(prog_val * 100))
         self.lbl_speed_display.setText("-" if prog_val >= 1.0 or "0.0 MB" in speed_str else speed_str)
 
@@ -536,6 +601,9 @@ class EpisodeRowWidget(QFrame):
         self.ep_path = path
         self.ep_rating = rating
         self._image_thread = None
+        self._qbit_initial_size_bytes = 0
+        self._last_summary_telemetry = {}
+        self._last_summary_db_status = "NOT STARTED"
         
         # State tracking for mathematically accurate parent aggregation
         self.current_progress = 0
@@ -601,9 +669,10 @@ class EpisodeRowWidget(QFrame):
         cs_v.addWidget(self.lbl_conv_status)
         status_layout.addWidget(cs_container)
 
-        cp_container, cp_v = create_status_column("Conversion Progress", 130)
+        cp_container, cp_v = create_status_column("Conversion Progress", 90)
         from src.ui.components.progress_pill import ProgressPillWidget
         self.prog_pill_conv = ProgressPillWidget()
+        self.prog_pill_conv.setFixedSize(90, 24)
         cp_v.addWidget(self.prog_pill_conv)
         status_layout.addWidget(cp_container)
 
@@ -676,9 +745,10 @@ class EpisodeRowWidget(QFrame):
         self.btn_ffmpeg_log = QPushButton("FFmpeg log")
         for btn in (self.btn_general_log, self.btn_ffmpeg_log):
             btn.setObjectName("ActionIconButton")
-            btn.setMinimumHeight(30)
+            btn.setMinimumHeight(36)
+            btn.setMinimumWidth(112)
             btn.setIcon(QIcon(log_icon_path))
-            btn.setIconSize(QSize(16, 16))
+            btn.setIconSize(QSize(18, 18))
             btn.setEnabled(False)
         self.btn_general_log.clicked.connect(lambda: self._open_log_file(self._gen_log_local_path))
         self.btn_ffmpeg_log.clicked.connect(lambda: self._open_log_file(self._ff_log_local_path))
@@ -696,10 +766,17 @@ class EpisodeRowWidget(QFrame):
         QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
 
     def _update_foldout_summary(self, telemetry: dict, db_status: str) -> None:
-        initial_size = _safe_int(telemetry.get("initial_size_bytes", 0))
+        self._last_summary_telemetry = telemetry or {}
+        self._last_summary_db_status = str(db_status or "NOT STARTED")
+        qbit_initial_size = _safe_int(self._qbit_initial_size_bytes)
+        # Source of truth: qBittorrent file size for episodes.
+        initial_size = qbit_initial_size
         final_size = _safe_int(telemetry.get("final_size_bytes", 0))
         diff_pct = _safe_float(telemetry.get("size_diff_pct", 0.0))
         total_minutes = _safe_float(telemetry.get("conversion_total_minutes", 0.0))
+
+        if diff_pct == 0.0 and initial_size > 0 and final_size > 0:
+            diff_pct = round(((initial_size - final_size) / float(initial_size)) * 100.0, 2)
 
         self.lbl_initial_size.setText(f"Initial size: {_format_size_bytes(initial_size) if initial_size > 0 else '-'}")
         if initial_size > 0 and final_size > 0:
@@ -757,6 +834,7 @@ class EpisodeRowWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
+            self.flowchart_view.show_foldout_loading()
             summary_h = self._summary_height()
             if getattr(self.flowchart_view, '_is_revealed', False):
                 target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + summary_h + 20
@@ -766,7 +844,7 @@ class EpisodeRowWidget(QFrame):
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
                 self.foldout_container.setMaximumHeight(16777215)
-                self.flowchart_view.refresh_pipeline()
+                self.flowchart_view.reveal_after_foldout_expand()
                 restore_updates()
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -825,6 +903,18 @@ class EpisodeRowWidget(QFrame):
             self.sub_lbl.setText(rating_str)
         if still_url:
             self._fetch_episode_image(still_url)
+
+    def set_qbit_initial_size_hint(self, size_bytes: int) -> None:
+        new_size = max(0, _safe_int(size_bytes))
+        if new_size <= 0:
+            return
+        if new_size == self._qbit_initial_size_bytes:
+            return
+
+        self._qbit_initial_size_bytes = new_size
+
+        # Recompute summary immediately so UI reflects refreshed qB size data.
+        self._update_foldout_summary(self._last_summary_telemetry, self._last_summary_db_status)
 
     def _fetch_episode_image(self, url: str):
         self._image_thread = ImageDownloaderThread(url, self)
@@ -945,6 +1035,7 @@ class SeriesCardWidget(QWidget):
         self.season = season
         self.is_season = is_season
         self.episodes_map = {} 
+        self._cached_files = []
         self._expanded = False
         
         base_title = title if title else "Unknown Media"
@@ -1028,6 +1119,7 @@ class SeriesCardWidget(QWidget):
         from src.ui.components.progress_pill import ProgressPillWidget
         self.prog_bar_dl = ProgressPillWidget()
         self.prog_bar_dl.set_data("Not Started", 0)
+        self.prog_bar_dl.setFixedSize(90, 24)
         pr_v.addWidget(self.prog_bar_dl)
         status_layout.addWidget(pr_container)
 
@@ -1047,9 +1139,10 @@ class SeriesCardWidget(QWidget):
         cs_v.addWidget(self.lbl_conv_status)
         status_layout.addWidget(cs_container)
 
-        cp_container, cp_v = create_status_column("Season Progress", 130)
+        cp_container, cp_v = create_status_column("Season Progress", 90)
         from src.ui.components.progress_pill import ProgressPillWidget
         self.prog_pill_conv = ProgressPillWidget()
+        self.prog_pill_conv.setFixedSize(90, 24)
         cp_v.addWidget(self.prog_pill_conv)
         status_layout.addWidget(cp_container)
         
@@ -1180,7 +1273,9 @@ class SeriesCardWidget(QWidget):
         self.lbl_poster.setPixmap(rounded)
         self.lbl_poster.setText("")
 
-    def update_torrent_ui(self, human_state, pill_class, pb_style, prog_val, size_str, speed_str, active_state_str):
+    def update_torrent_ui(self, human_state, pill_class, pb_style, prog_val, size_str, speed_str, active_state_str, hash_val: str = "", raw_size_bytes: int = 0):
+        if hash_val:
+            self._current_hash = hash_val
         self.lbl_state_val.setText(human_state)
         self.lbl_state_val.setProperty("class", pill_class)
         self.lbl_state_val.style().unpolish(self.lbl_state_val)
@@ -1190,7 +1285,7 @@ class SeriesCardWidget(QWidget):
         self.lbl_speed_display.setText(speed_str)
         self.prog_bar_dl.set_data(human_state, int(prog_val * 100))
 
-    def _ensure_episode_row(self, rel_path: str, tmdb_episodes: dict = None):
+    def _ensure_episode_row(self, rel_path: str, tmdb_episodes: dict = None, qbit_size_bytes: int = 0):
         # 1. Extract ep_num immediately
         match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', rel_path)
         if not match: match = re.search(r'[eE](\d{1,2})', rel_path)
@@ -1209,6 +1304,8 @@ class SeriesCardWidget(QWidget):
                     break
                     
         if row:
+            if qbit_size_bytes > 0 and hasattr(row, "set_qbit_initial_size_hint"):
+                row.set_qbit_initial_size_hint(qbit_size_bytes)
             # We found an existing row, just update its TMDB data if available
             if tmdb_episodes:
                 ep_data = tmdb_episodes.get(ep_num) or tmdb_episodes.get(str(ep_num))
@@ -1241,6 +1338,8 @@ class SeriesCardWidget(QWidget):
         
         row = EpisodeRowWidget(display_title, desc, path=rel_path, ep_num=ep_num, rating=ep_rating)
         row.badge.setText(f"EP {ep_num}")
+        if qbit_size_bytes > 0:
+            row.set_qbit_initial_size_hint(qbit_size_bytes)
             
         if still_url:
             row.update_tmdb_data(display_title, desc, still_url)
@@ -1261,13 +1360,80 @@ class SeriesCardWidget(QWidget):
         return row
 
     def populate_episodes_from_files(self, files: list, tmdb_episodes: dict = None):
+        self._cached_files = files or []
         video_extensions = ('.mp4', '.mkv', '.avi', '.m4v')
         video_files = [f for f in files if f.get('name', '').lower().endswith(video_extensions)]
         
         for f_info in sorted(video_files, key=lambda x: x.get('name', '')):
             rel_path = f_info.get('name', '')
             if not rel_path: continue
-            self._ensure_episode_row(rel_path, tmdb_episodes)
+            qbit_size = _safe_int(f_info.get('size', 0))
+            self._ensure_episode_row(rel_path, tmdb_episodes, qbit_size_bytes=qbit_size)
+
+    def _extract_episode_number(self, value: str):
+        if not value:
+            return None
+        match = re.search(r'[sS]?(\d{1,2})[xXeE](\d{1,2})', value)
+        if not match:
+            match = re.search(r'[eE](\d{1,2})', value)
+        if not match:
+            return None
+        return int(match.group(2)) if len(match.groups()) > 1 else int(match.group(1))
+
+    def _resolve_qbit_initial_size(self, telemetry_path: str, row=None) -> int:
+        cached_files = getattr(self, '_cached_files', None) or []
+        normalized_telemetry_path = str(telemetry_path or '').replace('\\', '/').lower()
+        telemetry_basename = os.path.basename(normalized_telemetry_path)
+
+        # Use strict filename/suffix matching to avoid cross-season E07 collisions.
+        for f_info in cached_files:
+            file_path = str(f_info.get('name', '')).replace('\\', '/').lower()
+            if not file_path:
+                continue
+            if file_path.endswith(normalized_telemetry_path) or os.path.basename(file_path) == telemetry_basename:
+                return _safe_int(f_info.get('size', 0))
+
+        # Live qB fallback: derive the file size directly from current torrent hash + basename.
+        # This mirrors the verified EP7 source used in manual tracing (2931171105 bytes => 2.93 GB).
+        current_hash = str(getattr(self, '_current_hash', '') or '')
+        if not current_hash:
+            return 0
+        try:
+            host = os.getenv("QBIT_HOST")
+            port = os.getenv("QBIT_PORT")
+            user = os.getenv("QBIT_USER")
+            pwd = os.getenv("QBIT_PASS")
+            if not all([host, port, user, pwd]):
+                return 0
+
+            client = qbittorrentapi.Client(
+                host=f"http://{host}:{port}",
+                username=user,
+                password=pwd,
+            )
+            client.auth_log_in()
+            raw_files = client.torrents_files(torrent_hash=current_hash)
+
+            # Refresh local cached files with live data when available.
+            refreshed = []
+            for f in raw_files:
+                refreshed.append({
+                    "name": f.get("name", ""),
+                    "size": _safe_int(f.get("size", 0), 0),
+                })
+            if refreshed:
+                self._cached_files = refreshed
+
+            for f_info in refreshed:
+                file_path = str(f_info.get('name', '')).replace('\\', '/').lower()
+                if not file_path:
+                    continue
+                if file_path.endswith(normalized_telemetry_path) or os.path.basename(file_path) == telemetry_basename:
+                    return _safe_int(f_info.get('size', 0))
+        except Exception:
+            return 0
+
+        return 0
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
@@ -1296,9 +1462,27 @@ class SeriesCardWidget(QWidget):
                         break
                             
             if not row:
-                row = self._ensure_episode_row(path, getattr(self, '_cached_tmdb_eps', None))
+                qbit_size = self._resolve_qbit_initial_size(path)
+                row = self._ensure_episode_row(path, getattr(self, '_cached_tmdb_eps', None), qbit_size_bytes=qbit_size)
                 
             if row:
+                qbit_size = self._resolve_qbit_initial_size(path, row=row)
+                if qbit_size > 0 and hasattr(row, 'set_qbit_initial_size_hint'):
+                    row.set_qbit_initial_size_hint(qbit_size)
+
+                # Keep episode metadata hydrated regardless of event order.
+                tmdb_eps = getattr(self, '_cached_tmdb_eps', None)
+                if tmdb_eps and hasattr(row, 'ep_num'):
+                    ep_meta = tmdb_eps.get(row.ep_num) or tmdb_eps.get(str(row.ep_num))
+                    if ep_meta:
+                        ep_vote = ep_meta.get('vote_average', '-')
+                        ep_rating_str = str(round(float(ep_vote), 1)) if ep_vote and ep_vote != '-' else '-'
+                        row.update_tmdb_data(
+                            ep_meta.get('name', row.ep_name),
+                            ep_meta.get('overview', row.lbl_desc.text()),
+                            ep_meta.get('still_url', ''),
+                            rating=ep_rating_str
+                        )
                 row.update_status(ep_data)
 
         # 2. Derive true season average from the physically stored states of ALL rows

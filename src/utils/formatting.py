@@ -1,5 +1,3 @@
-import math
-
 def format_size(size_in_bytes: int) -> str:
     """Converts raw bytes to human-readable size exactly like qBittorrent (Base-10)."""
     try:

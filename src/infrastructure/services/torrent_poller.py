@@ -1,6 +1,4 @@
 import os
-import time
-from typing import List, Optional
 
 import qbittorrentapi
 from PyQt6.QtCore import QThread, pyqtSignal

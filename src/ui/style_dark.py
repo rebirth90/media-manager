@@ -1,5 +1,3 @@
-from typing import Dict
-
 # Dark Theme Design Tokens
 COLORS = {
     # Backgrounds
