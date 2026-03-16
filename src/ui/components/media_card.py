@@ -12,6 +12,7 @@ from src.ui.dialogs.flow_details import FlowDetailsModal
 from src.ui.dialogs.delete_torrent import DeleteTorrentDialog
 from src.ui.conversion_flowchart import ConversionFlowViewer
 from src.infrastructure.services.image_downloader import ImageDownloaderThread
+from src.presentation.utils.ui_helpers import apply_blur_effect, remove_blur_effect
 
 
 # -------------------------------------------------------------
@@ -188,6 +189,7 @@ class MediaCardWidget(QFrame):
         self.foldout_layout.setContentsMargins(10, 0, 10, 0)
         
         self.flowchart_view = ConversionFlowViewer()
+        self.flowchart_view.height_calculated.connect(self._sync_foldout_height)
         self.foldout_layout.addWidget(self.flowchart_view)
         self.main_layout.addWidget(self.foldout_container)
 
@@ -202,8 +204,8 @@ class MediaCardWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(350)
-            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
+            self._foldout_anim.setDuration(420)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
 
         self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
@@ -217,11 +219,15 @@ class MediaCardWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            target_h = self.foldout_layout.sizeHint().height() + 20
+            if getattr(self.flowchart_view, '_is_revealed', False):
+                target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + 20
+            else:
+                target_h = 190
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
                 self.foldout_container.setMaximumHeight(16777215)
+                self.flowchart_view.refresh_pipeline()
                 restore_updates()
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -234,10 +240,37 @@ class MediaCardWidget(QFrame):
             self._foldout_anim.setEndValue(0)
             self._foldout_anim.start()
 
+    def _sync_foldout_height(self, chart_height: int):
+        if self.foldout_container.maximumHeight() == 0:
+            return
+        target_h = max(190, int(chart_height) + 20)
+        anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
+        anim.setDuration(280)
+        anim.setStartValue(self.foldout_container.height())
+        anim.setEndValue(target_h)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._foldout_resize_anim = anim
+        anim.start()
+
+    def collapse_foldout(self) -> None:
+        if hasattr(self, '_foldout_anim'):
+            self._foldout_anim.stop()
+        self.foldout_container.setMaximumHeight(0)
+        self.foldout_container.setVisible(False)
+
     def _prompt_delete(self) -> None:
-        dialog = DeleteTorrentDialog(self.title, self.window())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.delete_confirmed.emit([self._current_hash] if self._current_hash else [], dialog.should_delete_files(), self)
+        host = self.window()
+        media_grid = getattr(host, 'media_grid', None)
+        if media_grid and hasattr(media_grid, 'collapse_all_foldouts'):
+            media_grid.collapse_all_foldouts()
+        blur_target = getattr(host, 'central_w', host)
+        apply_blur_effect(blur_target, radius=90)
+        try:
+            dialog = DeleteTorrentDialog(self.title, host)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.delete_confirmed.emit([self._current_hash] if self._current_hash else [], dialog.should_delete_files(), self)
+        finally:
+            remove_blur_effect(blur_target)
 
     def set_poster_pixmap(self, raw_pixmap: QPixmap) -> None:
         scaled = raw_pixmap.scaled(self.lbl_poster.width(), self.lbl_poster.height(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
@@ -276,7 +309,24 @@ class MediaCardWidget(QFrame):
 
     def update_telemetry_ui(self, episodes_data: list):
         if not episodes_data: return
-        first_ep = episodes_data[0]
+        # Telemetry may include multiple jobs; choose the best path match for this card.
+        rel_norm = (self.relative_path or "").replace('\\', '/').lower()
+        rel_leaf = os.path.basename(rel_norm)
+        title_tokens = [w for w in re.split(r'\W+', (self.title or '').lower()) if len(w) > 2]
+
+        def _score(entry: dict) -> int:
+            path = (entry.get("path", "") or "").replace('\\', '/').lower()
+            score = 0
+            if rel_norm and rel_norm in path:
+                score += 100
+            if rel_leaf and rel_leaf in path:
+                score += 60
+            score += sum(3 for t in title_tokens if t in path)
+            if entry.get("db_status", "").upper() == "COMPLETED":
+                score -= 2
+            return score
+
+        first_ep = max(episodes_data, key=_score)
         db_status = first_ep.get("db_status", first_ep.get("status", "NOT STARTED")).upper()
         from src.ui.components.progress_pill import calculate_conversion_progress
         state_text, percentage = calculate_conversion_progress(first_ep)
@@ -322,8 +372,8 @@ class MediaCardWidget(QFrame):
                 stage_flags["p8-movie"] = True
                 stage_flags["p8-cleanup"] = True
 
-        if percentage == 0 and db_status not in ["COMPLETED"]:
-            stage_flags = {}
+        if not stage_flags and db_status in ["NOT STARTED", "PENDING", "QUEUED", "WAITING"]:
+            stage_flags = {"p1-input": True, "p1-queue": True}
 
         self.flowchart_view.update_pipeline_state(stage_flags)
 
@@ -448,6 +498,7 @@ class EpisodeRowWidget(QFrame):
         self.foldout_layout.setContentsMargins(10, 0, 10, 0)
         
         self.flowchart_view = ConversionFlowViewer()
+        self.flowchart_view.height_calculated.connect(self._sync_foldout_height)
         self.foldout_layout.addWidget(self.flowchart_view)
         self.main_layout.addWidget(self.foldout_container)
 
@@ -464,8 +515,8 @@ class EpisodeRowWidget(QFrame):
         is_opening = self.foldout_container.maximumHeight() == 0
         if not hasattr(self, '_foldout_anim'):
             self._foldout_anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
-            self._foldout_anim.setDuration(350)
-            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
+            self._foldout_anim.setDuration(420)
+            self._foldout_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
 
         self._foldout_anim.stop()
         try: self._foldout_anim.finished.disconnect()
@@ -479,11 +530,15 @@ class EpisodeRowWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
-            target_h = self.foldout_layout.sizeHint().height() + 20
+            if getattr(self.flowchart_view, '_is_revealed', False):
+                target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + 20
+            else:
+                target_h = 190
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
                 self.foldout_container.setMaximumHeight(16777215)
+                self.flowchart_view.refresh_pipeline()
                 restore_updates()
             self._foldout_anim.finished.connect(on_open_finished)
             self._foldout_anim.start()
@@ -496,10 +551,37 @@ class EpisodeRowWidget(QFrame):
             self._foldout_anim.setEndValue(0)
             self._foldout_anim.start()
 
+    def _sync_foldout_height(self, chart_height: int):
+        if self.foldout_container.maximumHeight() == 0:
+            return
+        target_h = max(190, int(chart_height) + 20)
+        anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
+        anim.setDuration(280)
+        anim.setStartValue(self.foldout_container.height())
+        anim.setEndValue(target_h)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._foldout_resize_anim = anim
+        anim.start()
+
+    def collapse_foldout(self) -> None:
+        if hasattr(self, '_foldout_anim'):
+            self._foldout_anim.stop()
+        self.foldout_container.setMaximumHeight(0)
+        self.foldout_container.setVisible(False)
+
     def _prompt_delete(self) -> None:
-        dialog = DeleteTorrentDialog(self.ep_name, self.window())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.delete_episode.emit(self.ep_path)
+        host = self.window()
+        media_grid = getattr(host, 'media_grid', None)
+        if media_grid and hasattr(media_grid, 'collapse_all_foldouts'):
+            media_grid.collapse_all_foldouts()
+        blur_target = getattr(host, 'central_w', host)
+        apply_blur_effect(blur_target, radius=90)
+        try:
+            dialog = DeleteTorrentDialog(self.ep_name, host)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.delete_episode.emit(self.ep_path)
+        finally:
+            remove_blur_effect(blur_target)
 
     def update_tmdb_data(self, title: str, overview: str, still_url: str = "", rating: str = None):
         if title:
@@ -553,7 +635,7 @@ class EpisodeRowWidget(QFrame):
             self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
             self.lbl_conv_status.style().polish(self.lbl_conv_status)
             self.prog_pill_conv.set_data("Not Started", 0)
-            self.flowchart_view.update_pipeline_state({})
+            self.flowchart_view.update_pipeline_state({"p1-input": True, "p1-queue": True})
             return
 
         state_text, percentage = calculate_conversion_progress(ep_data)
@@ -610,8 +692,8 @@ class EpisodeRowWidget(QFrame):
                 stage_flags["p8-cleanup"] = True
 
         # STRICT ISOLATION: Wipe visual pipeline for pending episodes
-        if percentage == 0 and db_status not in ["COMPLETED"]:
-            stage_flags = {}
+        if not stage_flags and db_status in ["NOT STARTED", "PENDING", "QUEUED", "WAITING"]:
+            stage_flags = {"p1-input": True, "p1-queue": True}
 
         self.flowchart_view.update_pipeline_state(stage_flags)
 
@@ -800,8 +882,8 @@ class SeriesCardWidget(QWidget):
         
         if not hasattr(self, '_ep_anim'):
             self._ep_anim = QPropertyAnimation(self.episodes_container, b"maximumHeight", self)
-            self._ep_anim.setDuration(400)
-            self._ep_anim.setEasingCurve(QEasingCurve.Type.InOutExpo)
+            self._ep_anim.setDuration(460)
+            self._ep_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         
         self._ep_anim.stop()
         try: self._ep_anim.finished.disconnect()
@@ -833,6 +915,15 @@ class SeriesCardWidget(QWidget):
             self._ep_anim.setStartValue(self.episodes_container.height())
             self._ep_anim.setEndValue(0)
             self._ep_anim.start()
+
+    def collapse_episodes(self) -> None:
+        self._expanded = False
+        if hasattr(self, '_ep_anim'):
+            self._ep_anim.stop()
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        self.btn_expand.setIcon(QIcon(os.path.join(base_dir, "assets", "chevron_down.svg")))
+        self.episodes_container.setMaximumHeight(0)
+        self.episodes_container.setVisible(False)
 
     def update_metadata(self, title, desc, genre, rating):
         display_title = title
@@ -1044,6 +1135,15 @@ class SeriesCardWidget(QWidget):
         self.prog_pill_conv.repaint()
 
     def _prompt_delete(self) -> None:
-        dialog = DeleteTorrentDialog(self.title, self.window())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.delete_confirmed.emit([self._current_hash] if self._current_hash else [], dialog.should_delete_files(), self)
+        host = self.window()
+        media_grid = getattr(host, 'media_grid', None)
+        if media_grid and hasattr(media_grid, 'collapse_all_foldouts'):
+            media_grid.collapse_all_foldouts()
+        blur_target = getattr(host, 'central_w', host)
+        apply_blur_effect(blur_target, radius=90)
+        try:
+            dialog = DeleteTorrentDialog(self.title, host)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.delete_confirmed.emit([self._current_hash] if self._current_hash else [], dialog.should_delete_files(), self)
+        finally:
+            remove_blur_effect(blur_target)

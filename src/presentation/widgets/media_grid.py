@@ -15,6 +15,7 @@ class MediaGridWidget(QWidget):
         super().__init__(parent)
         self.repo = repo
         self.all_flows = []
+        self._state_cache = {}
         
         self.setObjectName("CanvasContainer")
         canvas_layout = QVBoxLayout(self)
@@ -50,6 +51,16 @@ class MediaGridWidget(QWidget):
     def load_initial_data(self):
         items = self.repo.get_all_items()
         for item in items:
+            self._state_cache[item.id] = {
+                "title": item.title,
+                "description": item.description,
+                "genre": item.genre,
+                "rating": item.rating,
+                "image_url": item.image_url,
+                "torrent_data": item.torrent_data,
+                "conversion_data": item.conversion_data,
+            }
+        for item in items:
             self._render_item(item)
 
     def _render_item(self, item):
@@ -74,14 +85,15 @@ class MediaGridWidget(QWidget):
             flow = MediaCardWidget(index=index, relative_path=item.relative_path, title=item.title, season=item.season, hash_val=hash_val, db_id=item.id, parent=self.scroll_content)
             
         # Hydrate description visually
-        desc = item.description or "No description available."
-        genre = item.genre or "Unknown"
-        rating = item.rating or "-"
+        state = self._state_cache.get(item.id, {})
+        desc = state.get("description") or item.description or "No description available."
+        genre = state.get("genre") or item.genre or "Unknown"
+        rating = state.get("rating") or item.rating or "-"
         flow.update_metadata(item.title, desc, genre, rating)
         
         # Determine conversion state visually
         conversion_completed = False
-        c_data_str = item.conversion_data or self.repo.get_conversion_cache(item.relative_path.replace("\\", "/"))
+        c_data_str = state.get("conversion_data") or item.conversion_data or self.repo.get_conversion_cache(item.relative_path.replace("\\", "/"))
         if c_data_str:
             try:
                 c_info = json.loads(c_data_str)
@@ -95,9 +107,10 @@ class MediaGridWidget(QWidget):
             
         # Determine torrent state visually
         torrent_completed = False
-        if item.torrent_data:
+        t_data_str = state.get("torrent_data") or item.torrent_data
+        if t_data_str:
             try:
-                t_info = json.loads(item.torrent_data)
+                t_info = json.loads(t_data_str)
                 flow.update_torrent_ui(
                     human_state=t_info.get("human_state", "Unknown"),
                     pill_class=t_info.get("pill_class", "PillUnknown"),
@@ -121,6 +134,23 @@ class MediaGridWidget(QWidget):
             if getattr(f, 'db_id', None) == item_id:
                 return f
         return None
+
+    def collapse_all_foldouts(self) -> None:
+        seen_episode_rows = set()
+        for flow in self.all_flows:
+            if hasattr(flow, 'collapse_foldout'):
+                flow.collapse_foldout()
+            if hasattr(flow, 'collapse_episodes'):
+                flow.collapse_episodes()
+
+            episodes_map = getattr(flow, 'episodes_map', {}) or {}
+            for row in episodes_map.values():
+                row_id = id(row)
+                if row_id in seen_episode_rows:
+                    continue
+                seen_episode_rows.add(row_id)
+                if hasattr(row, 'collapse_foldout'):
+                    row.collapse_foldout()
 
     def _on_media_added(self, item_id: int):
         item = self.repo.get_item(item_id)
@@ -168,6 +198,9 @@ class MediaGridWidget(QWidget):
             )
             if t_info.get("prog_val", 0.0) >= 1.0:
                 flow.torrent_completed = True
+
+            cached = self._state_cache.setdefault(item_id, {})
+            cached["torrent_data"] = item.torrent_data
             
             # Populate episode rows when file list first arrives for TV series
             cached_files = t_info.get("files", [])
@@ -190,6 +223,8 @@ class MediaGridWidget(QWidget):
             flow.update_telemetry_ui(c_info)
             if c_info and all(ep.get("db_status", "NOT STARTED").upper() in ["COMPLETED", "FAILED", "REJECTED"] for ep in c_info):
                 flow.conversion_completed = True
+            cached = self._state_cache.setdefault(item_id, {})
+            cached["conversion_data"] = item.conversion_data
         except: pass
 
     def _on_metadata_updated(self, item_id: int):
@@ -202,6 +237,11 @@ class MediaGridWidget(QWidget):
         genre = item.genre or "Unknown"
         rating = item.rating or "-"
         flow.update_metadata(item.title, desc, genre, rating)
+        cached = self._state_cache.setdefault(item_id, {})
+        cached["title"] = item.title
+        cached["description"] = item.description
+        cached["genre"] = item.genre
+        cached["rating"] = item.rating
 
     def filter_items(self, query: str, category: str):
         filter_key = f"{query.lower().strip()}|{category}"

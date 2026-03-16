@@ -277,36 +277,53 @@ class ConversionFlowViewer(QWidget):
         from src.presentation.widgets.pipeline_asset_builder import PipelineAssetBuilder
         builder = PipelineAssetBuilder()
         html_content = builder.build_html("{}")
-        self._view.setHtml(html_content)
+        from PyQt6.QtCore import QUrl
+        self._view.setHtml(html_content, QUrl("about:blank"))
         self.lay.addWidget(self._view)
 
         self.opacity_effect = QGraphicsOpacityEffect(self._view)
         self._view.setGraphicsEffect(self.opacity_effect)
         self.opacity_effect.setOpacity(0.0)
-        
+
         # Lock initial container height to the loading screen size
         self.setMinimumHeight(150)
         self.setMaximumHeight(150)
+        
+        # Failsafe reveal in case loadFinished is dropped during rapid WebEngine initialization
+        QTimer.singleShot(3000, self._failsafe_reveal)
+        
+    def _failsafe_reveal(self):
+        if not self._page_loaded:
+            self._on_load_finished(True)
 
     def _on_load_finished(self, ok):
-        if ok:
-            self._page_loaded = True
-            self._inject_highlight_styles()
-            
-            if self._pending_json:
-                self.update_pipeline_state(self._pending_json)
-            
-            # Allow webengine 400ms to paint and JS to settle before revealing
-            QTimer.singleShot(400, self._reveal_pipeline)
+        self._page_loaded = True
+        self._inject_highlight_styles()
 
+        if self._pending_json:
+            self.update_pipeline_state(self._pending_json)
+
+        # Allow webengine 400ms to paint and JS to settle before revealing  
+        QTimer.singleShot(400, self._reveal_pipeline)
     def _reveal_pipeline(self):
         if self._is_revealed: return
+
+        # Wait for a stable layout width to avoid half-size first paint.
+        host_w = self.width()
+        if host_w < 500:
+            parent = self.parentWidget()
+            if parent:
+                host_w = max(host_w, parent.width())
+        if host_w < 500:
+            QTimer.singleShot(120, self._reveal_pipeline)
+            return
+
         self._is_revealed = True
         
         self.pulse_anim.stop()
         
         # Calculate final mathematical height synchronously
-        w = self.width() if self.width() > 100 else 1000
+        w = host_w if host_w > 100 else 1000
         zoom = w / 2440.0 if w < 2440.0 else 1.0
         target_h = int(750.0 * zoom)
         self._forced_h = max(target_h, 500)
@@ -354,6 +371,11 @@ class ConversionFlowViewer(QWidget):
             @keyframes flowAnim { 
                 from { stroke-dashoffset: 15; }
                 to { stroke-dashoffset: 0; } 
+            }
+
+            @keyframes march {
+                from { stroke-dashoffset: 15; }
+                to { stroke-dashoffset: 0; }
             }
             
             .stage-success {
@@ -436,7 +458,7 @@ class ConversionFlowViewer(QWidget):
         self._view.setFixedHeight(self._forced_h)
         self._view.setZoomFactor(zoom)
 
-    def update_pipeline_state(self, stages_data) -> None:
+    def update_pipeline_state(self, stages_data, force: bool = False) -> None:
         try:
             if isinstance(stages_data, str):
                 raw_flags = json.loads(stages_data) if stages_data else {}
@@ -468,7 +490,7 @@ class ConversionFlowViewer(QWidget):
                         flags[k] = bool(v)
 
             clean_json = json.dumps(flags)
-            if getattr(self, '_rendered_json', None) == clean_json: 
+            if (not force) and getattr(self, '_rendered_json', None) == clean_json:
                 return
                 
             if not self._page_loaded: 
@@ -529,6 +551,21 @@ class ConversionFlowViewer(QWidget):
             }})();
             """
             self._view.page().runJavaScript(js)
+        except Exception:
+            pass
+
+    def refresh_pipeline(self) -> None:
+        """Force a redraw/rebind when a hidden foldout becomes visible."""
+        try:
+            if not self._page_loaded:
+                return
+
+            if getattr(self, '_rendered_json', None):
+                self.update_pipeline_state(self._rendered_json, force=True)
+
+            self._view.page().runJavaScript(
+                "window.dispatchEvent(new Event('resize'));"
+            )
         except Exception:
             pass
 

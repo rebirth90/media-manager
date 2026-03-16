@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QIcon
 import os
 
+from src.presentation.utils.ui_helpers import animate_dialog_open
+
 class MediaCategoryDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -81,7 +83,7 @@ class MediaCategoryDialog(QDialog):
         self.genre_dropdown = QComboBox()
         self.genre_dropdown.addItems([
             "action", "adventure", "anime", "comedy",
-            "crime", "drama", "horror", "sf", "thriller"
+            "crime", "drama", "horror", "romance", "sf", "thriller"
         ])
         self.genre_dropdown.setFixedHeight(44)
         self.genre_dropdown.setStyleSheet(f"""
@@ -169,6 +171,13 @@ class MediaCategoryDialog(QDialog):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
+        self._open_animated = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._open_animated:
+            self._open_animated = True
+            animate_dialog_open(self)
 
     def _select_type(self, index: int) -> None:
         self._is_movie = (index == 0)

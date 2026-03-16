@@ -4,6 +4,8 @@ from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout
 
+from src.presentation.utils.ui_helpers import animate_dialog_open
+
 class BrowserModalDialog(QDialog):
     torrent_downloaded = pyqtSignal(str, str, str, str)
 
@@ -41,6 +43,13 @@ class BrowserModalDialog(QDialog):
         self.web_view.setUrl(QUrl("https://filelist.io/browse.php"))
         self._current_request = None
         self._accepted_download = False
+        self._open_animated = False
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._open_animated:
+            self._open_animated = True
+            animate_dialog_open(self, y_offset=22, duration=260)
 
     def _on_download_requested(self, request: QWebEngineDownloadRequest) -> None:
         self._current_request = request

@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit
 )
 
+from src.presentation.utils.ui_helpers import animate_dialog_open
+
 class FlowDetailsModal(QDialog):
     def __init__(
         self, 
@@ -202,3 +204,10 @@ class FlowDetailsModal(QDialog):
 
         main_layout.addLayout(left_layout, stretch=1)
         main_layout.addLayout(right_layout, stretch=2)
+        self._open_animated = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._open_animated:
+            self._open_animated = True
+            animate_dialog_open(self)

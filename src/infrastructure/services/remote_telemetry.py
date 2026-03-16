@@ -108,29 +108,44 @@ def main():
                     if linear_path[i] not in flags:
                         flags[linear_path[i]] = 'pass'
 
+            # Always infer movie vs tv if we have passed the router
+            if max_idx >= linear_path.index("p3-router"):
+                if not any(k in flags for k in ["p3-movie", "p3-tv"]):
+                    if "tv" in db_path.lower() or "season" in db_path.lower() or re.search(r's\d{2}e\d{2}', db_path.lower()):
+                        flags["p3-tv"] = 'pass'; flags["p4-tv"] = 'pass'
+                        if db_status.upper() == "COMPLETED": flags["p8-tv"] = 'pass'
+                    else:
+                        flags["p3-movie"] = 'pass'; flags["p4-movie"] = 'pass'
+                        if db_status.upper() == "COMPLETED": flags["p8-movie"] = 'pass'
+
             if db_status.upper() == "COMPLETED":
                 for c in linear_path:
                     if c not in flags:
                         flags[c] = 'pass'
-                
-                if not any(k in flags for k in ["p3-movie", "p3-tv"]):
-                    if "tv" in db_path.lower() or "season" in db_path.lower() or re.search(r's\d{2}e\d{2}', db_path.lower()):
-                        flags["p3-tv"] = 'pass'; flags["p4-tv"] = 'pass'; flags["p8-tv"] = 'pass'
-                    else:
-                        flags["p3-movie"] = 'pass'; flags["p4-movie"] = 'pass'; flags["p8-movie"] = 'pass'
-                        
+
+            # Build stable keyword list for log matching.
             words = [w.lower() for w in re.split(r'\W+', db_path) if len(w) > 3 and not w.isdigit()]
-            ignore = ['action', 'comedy', 'movies', 'scratch', 'data', 'dvdrip', 'xvid', 'x264', '1080p', '720p', 'web', 'dl', 'aac2', 'h264', 'mkv', 'avi', 'mp4']
+            ignore = [
+                'action', 'comedy', 'movies', 'scratch', 'data', 'dvdrip',
+                'xvid', 'x264', '1080p', '720p', 'web', 'dl', 'aac2', 'h264',
+                'mkv', 'avi', 'mp4', 'bluray', 'brrip', 'webrip', 'x265',
+                'hevc', 'hdr', 'proper', 'repack'
+            ]
             keywords = [w for w in words if w not in ignore]
-            
+
+            # Fallback to meaningful target words if path is too generic.
+            if not keywords:
+                target_words = [w.lower() for w in re.split(r'\W+', clean_target) if len(w) > 2 and not w.isdigit()]
+                keywords = [w for w in target_words if w not in ignore]
+
             gen_log_content = "Pending..."
             sub_status = "Pending"
             ff_tail = "Pending..."
             ff_prog = 0
             
             logs = sorted(glob.glob("/var/log/conversion/general/*.log"), key=os.path.getmtime, reverse=True)
-            matched_gen = next((log for log in logs if any(k in os.path.basename(log).lower() for k in keywords)), logs[0] if logs else None)
-                
+            matched_gen = next((log for log in logs if any(k in os.path.basename(log).lower() for k in keywords)), None)
+            
             if matched_gen:
                 try:
                     with open(matched_gen, 'r', encoding='utf-8', errors='ignore') as f:
@@ -141,7 +156,7 @@ def main():
                 except: pass
                 
             ff_logs = sorted(glob.glob("/var/log/conversion/ffmpeg/*.log"), key=os.path.getmtime, reverse=True)
-            matched_ff = next((log for log in ff_logs if any(k in os.path.basename(log).lower() for k in keywords)), ff_logs[0] if ff_logs else None)
+            matched_ff = next((log for log in ff_logs if any(k in os.path.basename(log).lower() for k in keywords)), None)
 
             if matched_ff:
                 try:

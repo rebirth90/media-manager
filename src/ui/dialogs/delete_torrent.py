@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QIcon
 import os
 
+from src.presentation.utils.ui_helpers import animate_dialog_open
+
 class DeleteTorrentDialog(QDialog):
     def __init__(self, torrent_name: str, parent=None):
         super().__init__(parent)
@@ -113,6 +115,13 @@ class DeleteTorrentDialog(QDialog):
         btn_layout.addWidget(btn_delete)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
+        self._open_animated = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._open_animated:
+            self._open_animated = True
+            animate_dialog_open(self)
 
     def should_delete_files(self) -> bool:
         # Index 0 is "App data"

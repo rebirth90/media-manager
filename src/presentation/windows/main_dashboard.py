@@ -14,6 +14,8 @@ from src.application.media_controller import parse_tv_title
 from src.application.use_cases.media_use_cases import AddMediaUseCase
 from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
 
+MODAL_BLUR_RADIUS = 90
+
 class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +50,7 @@ class MainDashboard(QMainWindow):
         self._is_dragging = False
         self._drag_pos = None
         self._modal_open = False
+        self._modal_blur_locks = 0
         
         self.central_w = QWidget()
         self.main_layout = QVBoxLayout(self.central_w)
@@ -89,11 +92,12 @@ class MainDashboard(QMainWindow):
 
     def _restore_saved_flows(self):
         """Loads items from the DB to populate the grid visually on start."""
+        items = self.repo.get_all_items()
         self.media_grid.load_initial_data()
         
         # Note: the media_controller in the original architecture was responsible for booting
         # up background tasks for all loaded flows.
-        for item in self.repo.get_all_items():
+        for item in items:
             self.media_controller.add_media_flow(
                 flow_index=item.id,
                 title=item.title,
@@ -108,9 +112,91 @@ class MainDashboard(QMainWindow):
             
         # Non-blocking filter to prevent initial hang
         QTimer.singleShot(0, lambda: self.media_grid.filter_items("", "Movies"))
-        
-        # Fade out overlay after initial render
-        QTimer.singleShot(500, self._fade_out_overlay)
+
+        # Keep startup overlay until initial row hydration is complete.
+        self._wait_for_initial_grid_ready(items)
+
+    def _wait_for_initial_grid_ready(self, items):
+        expected_ids = {item.id for item in items}
+        started_ms = 0
+
+        def poll_ready():
+            nonlocal started_ms
+            started_ms += 200
+
+            rendered_ids = {getattr(f, 'db_id', None) for f in self.media_grid.all_flows}
+            if expected_ids.issubset(rendered_ids):
+                self._fade_out_overlay()
+                return
+
+            if started_ms >= 10000:
+                self._fade_out_overlay()
+                return
+
+            QTimer.singleShot(200, poll_ready)
+
+        QTimer.singleShot(200, poll_ready)
+
+    def _apply_modal_blur(self):
+        self._modal_blur_locks += 1
+        if self._modal_blur_locks == 1:
+            apply_blur_effect(self.central_w, radius=MODAL_BLUR_RADIUS)
+
+    def _release_modal_blur(self):
+        if self._modal_blur_locks > 0:
+            self._modal_blur_locks -= 1
+        if self._modal_blur_locks == 0:
+            remove_blur_effect(self.central_w)
+
+    def _is_flow_render_ready(self, item_id: int) -> bool:
+        flow = self.media_grid._get_flow_by_id(item_id)
+        item = self.repo.get_item(item_id)
+        if not flow or not item:
+            return False
+
+        if not getattr(flow, 'title_lbl', None) or not flow.title_lbl.text().strip():
+            return False
+
+        if getattr(item, 'image_url', None):
+            pix = getattr(getattr(flow, 'lbl_poster', None), 'pixmap', lambda: None)()
+            if not pix or pix.isNull():
+                return False
+
+        if item.torrent_data:
+            state_val = getattr(getattr(flow, 'lbl_state_val', None), 'text', lambda: "")().strip().lower()
+            if state_val in ("", "initializing"):
+                return False
+
+        if item.conversion_data:
+            flowchart = getattr(flow, 'flowchart_view', None)
+            if not flowchart or not getattr(flowchart, '_page_loaded', False):
+                return False
+
+        return True
+
+    def _hold_blur_until_flow_ready(self, item_id: int):
+        waited_ms = 0
+
+        def poll_ready():
+            nonlocal waited_ms
+            waited_ms += 250
+            if self._is_flow_render_ready(item_id) or waited_ms >= 30000:
+                self._release_modal_blur()
+                return
+            QTimer.singleShot(250, poll_ready)
+
+        QTimer.singleShot(250, poll_ready)
+
+    def _exec_modal(self, dialog: QDialog, *, release_blur: bool = True, apply_blur: bool = True) -> int:
+        self.media_grid.collapse_all_foldouts()
+        if apply_blur:
+            self._apply_modal_blur()
+        try:
+            return dialog.exec()
+        finally:
+            if release_blur:
+                self._release_modal_blur()
+            self.header_nav.update_maximize_icon(self.isMaximized())
 
     def _fade_out_overlay(self):
         self.effect = QGraphicsOpacityEffect(self.loading_overlay)
@@ -133,22 +219,20 @@ class MainDashboard(QMainWindow):
         if self._modal_open: return
         self._modal_open = True
         try:
-            apply_blur_effect(self.media_grid, radius=25)
             dialog = BrowserModalDialog(self.shared_profile, self)
             dialog.torrent_downloaded.connect(self._process_downloaded_torrent)
-            dialog.exec()
+            result = self._exec_modal(dialog, release_blur=False)
+            if result != QDialog.DialogCode.Accepted:
+                self._release_modal_blur()
         finally:
-            remove_blur_effect(self.media_grid)
             self._modal_open = False
-            self.header_nav.update_maximize_icon(self.isMaximized())
 
     def _process_downloaded_torrent(self, file_path: str, img_url: str, title: str, season: str = "") -> None:
+        hold_blur_for_row = False
         try:
             torrent_name = os.path.splitext(os.path.basename(file_path))[0]
-            apply_blur_effect(self.media_grid, radius=25)
-
             dialog = MediaCategoryDialog(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
+            if self._exec_modal(dialog, release_blur=False, apply_blur=False) == QDialog.DialogCode.Accepted:
                 relative_path = dialog.get_relative_path()
                 with open(file_path, "rb") as f:
                     torrent_bytes = f.read()
@@ -183,11 +267,15 @@ class MainDashboard(QMainWindow):
                     media_type=media_type,
                     season=season
                 )
+
+                hold_blur_for_row = True
+                self._hold_blur_until_flow_ready(item_id)
                 
                 self.media_grid.filter_items(self.header_nav.get_search_query(), "TV Series" if self.header_nav.is_tv_series_selected() else "Movies")
         except Exception: pass
         finally:
-            remove_blur_effect(self.media_grid)
+            if not hold_blur_for_row:
+                self._release_modal_blur()
             self.header_nav.update_maximize_icon(self.isMaximized())
             try:
                 if file_path and os.path.exists(file_path): os.remove(file_path)
