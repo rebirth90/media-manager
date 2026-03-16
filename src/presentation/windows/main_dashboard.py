@@ -64,9 +64,7 @@ class MainDashboard(QMainWindow):
         # Connect Header Signals
         self.header_nav.add_clicked.connect(self._spawn_browser_modal)
         self.header_nav.toggle_changed.connect(self._on_media_toggle_changed)
-        self.header_nav.search_changed.connect(
-            lambda query: self.media_grid.filter_items(query, "TV Series" if self.header_nav.is_tv_series_selected() else "Movies")
-        )
+        self.header_nav.search_changed.connect(self._on_search_changed)
         self.header_nav.minimize_clicked.connect(self.showMinimized)
         self.header_nav.maximize_clicked.connect(self._toggle_maximize)
         self.header_nav.close_clicked.connect(self.close)
@@ -89,6 +87,28 @@ class MainDashboard(QMainWindow):
 
         # Initial Boot
         self._restore_saved_flows()
+
+    def _is_tv_selected_safe(self) -> bool:
+        try:
+            method = getattr(self.header_nav, "is_tv_series_selected", None)
+            if callable(method):
+                return bool(method())
+            toggle = getattr(self.header_nav, "animated_toggle", None)
+            if toggle and hasattr(toggle, "index"):
+                return int(toggle.index()) == 1
+        except Exception:
+            pass
+        return False
+
+    def _current_category_safe(self) -> str:
+        return "TV Series" if self._is_tv_selected_safe() else "Movies"
+
+    def _on_search_changed(self, query: str) -> None:
+        try:
+            self.media_grid.filter_items(query, self._current_category_safe())
+        except Exception:
+            # Search input should never crash the UI loop.
+            pass
 
     def _restore_saved_flows(self):
         """Loads items from the DB to populate the grid visually on start."""
@@ -284,7 +304,7 @@ class MainDashboard(QMainWindow):
                 hold_blur_for_row = True
                 self._hold_blur_until_flow_ready(item_id)
                 
-                self.media_grid.filter_items(self.header_nav.get_search_query(), "TV Series" if self.header_nav.is_tv_series_selected() else "Movies")
+                self.media_grid.filter_items(self.header_nav.get_search_query(), self._current_category_safe())
         except Exception: pass
         finally:
             if not hold_blur_for_row:

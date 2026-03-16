@@ -69,6 +69,9 @@ class HeaderNavigationWidget(QWidget):
         
     def get_search_query(self) -> str:
         return self.search_bar.get_query()
+
+    def is_tv_series_selected(self) -> bool:
+        return self.animated_toggle.index() == 1
         
     def update_maximize_icon(self, is_maximized: bool):
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
