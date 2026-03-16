@@ -1,10 +1,11 @@
 import os
 import re
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QSequentialAnimationGroup, QTimer
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QColor, QPen
+from datetime import datetime
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent, QSequentialAnimationGroup, QTimer, QUrl
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QColor, QPen, QDesktopServices
 from PyQt6.QtCore import QRectF, QSize
 from PyQt6.QtWidgets import (
-    QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QSizePolicy, QDialog,
+    QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QDialog,
     QGraphicsOpacityEffect, QScrollArea
 )
 
@@ -31,6 +32,72 @@ def create_status_column(title_str, min_width):
     cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
     v.addWidget(cap)
     return container, v
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _format_size_bytes(num_bytes: int) -> str:
+    size = float(max(0, _safe_int(num_bytes)))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024.0 or unit == "TB":
+            return f"{size:.2f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024.0
+    return "0 B"
+
+
+def _minutes_from_general_log(log_path: str) -> float:
+    if not log_path or not os.path.exists(log_path):
+        return 0.0
+    start_ts = None
+    end_ts = None
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2})\s+-', line)
+                if not ts_match:
+                    continue
+                if "PIPELINE STARTED" in line and start_ts is None:
+                    start_ts = datetime.strptime(ts_match.group(1), "%Y-%m-%d_%H:%M:%S")
+                if "PIPELINE SUCCESS" in line:
+                    end_ts = datetime.strptime(ts_match.group(1), "%Y-%m-%d_%H:%M:%S")
+        if start_ts and end_ts and end_ts >= start_ts:
+            return round((end_ts - start_ts).total_seconds() / 60.0, 2)
+    except Exception:
+        return 0.0
+    return 0.0
+
+
+def _minutes_from_general_log_text(log_text: str) -> float:
+    if not log_text:
+        return 0.0
+    start_ts = None
+    end_ts = None
+    try:
+        for line in str(log_text).splitlines():
+            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2})\s+-', line)
+            if not ts_match:
+                continue
+            if "PIPELINE STARTED" in line and start_ts is None:
+                start_ts = datetime.strptime(ts_match.group(1), "%Y-%m-%d_%H:%M:%S")
+            if "PIPELINE SUCCESS" in line:
+                end_ts = datetime.strptime(ts_match.group(1), "%Y-%m-%d_%H:%M:%S")
+        if start_ts and end_ts and end_ts >= start_ts:
+            return round((end_ts - start_ts).total_seconds() / 60.0, 2)
+    except Exception:
+        return 0.0
+    return 0.0
 
 
 # -------------------------------------------------------------
@@ -121,12 +188,9 @@ class MediaCardWidget(QFrame):
         status_layout.addWidget(sz_container)
 
         pr_container, pr_v = create_status_column("Torrent Progress", 90)
-        self.prog_bar_dl = QProgressBar()
-        self.prog_bar_dl.setRange(0, 100)
-        self.prog_bar_dl.setValue(0)
-        self.prog_bar_dl.setFormat("%p%")
-        self.prog_bar_dl.setFixedSize(80, 24)
-        self.prog_bar_dl.setProperty("class", "PbUnknown")
+        from src.ui.components.progress_pill import ProgressPillWidget
+        self.prog_bar_dl = ProgressPillWidget()
+        self.prog_bar_dl.set_data("Not Started", 0)
         pr_v.addWidget(self.prog_bar_dl)
         status_layout.addWidget(pr_container)
 
@@ -187,11 +251,93 @@ class MediaCardWidget(QFrame):
         self.foldout_container.setMaximumHeight(0) 
         self.foldout_layout = QVBoxLayout(self.foldout_container)
         self.foldout_layout.setContentsMargins(10, 0, 10, 0)
+
+        self._gen_log_local_path = ""
+        self._ff_log_local_path = ""
+        self._build_foldout_summary_panel()
         
         self.flowchart_view = ConversionFlowViewer()
         self.flowchart_view.height_calculated.connect(self._sync_foldout_height)
         self.foldout_layout.addWidget(self.flowchart_view)
         self.main_layout.addWidget(self.foldout_container)
+
+    def _build_foldout_summary_panel(self) -> None:
+        panel = QWidget()
+        panel.setObjectName("FoldoutStatsPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 10, 8, 8)
+        panel_layout.setSpacing(4)
+
+        row_metrics = QHBoxLayout()
+        row_metrics.setSpacing(18)
+
+        self.lbl_initial_size = QLabel("Initial size: -")
+        self.lbl_final_size = QLabel("Final size: -")
+        self.lbl_total_minutes = QLabel("Total conversion time: -")
+        for lbl in (self.lbl_initial_size, self.lbl_final_size, self.lbl_total_minutes):
+            lbl.setObjectName("SubText")
+            row_metrics.addWidget(lbl)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        log_icon_path = os.path.join(base_dir, "assets", "icons8-log.svg")
+        self.btn_general_log = QPushButton("General log")
+        self.btn_ffmpeg_log = QPushButton("FFmpeg log")
+        for btn in (self.btn_general_log, self.btn_ffmpeg_log):
+            btn.setObjectName("ActionIconButton")
+            btn.setMinimumHeight(30)
+            btn.setIcon(QIcon(log_icon_path))
+            btn.setIconSize(QSize(16, 16))
+            btn.setEnabled(False)
+        self.btn_general_log.clicked.connect(lambda: self._open_log_file(self._gen_log_local_path))
+        self.btn_ffmpeg_log.clicked.connect(lambda: self._open_log_file(self._ff_log_local_path))
+
+        row_metrics.addStretch(1)
+        row_metrics.addWidget(self.btn_general_log)
+        row_metrics.addWidget(self.btn_ffmpeg_log)
+        panel_layout.addLayout(row_metrics)
+
+        self.foldout_layout.addWidget(panel)
+
+    def _open_log_file(self, file_path: str) -> None:
+        if not file_path or not os.path.exists(file_path):
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _update_foldout_summary(self, telemetry: dict, db_status: str) -> None:
+        initial_size = _safe_int(telemetry.get("initial_size_bytes", 0))
+        final_size = _safe_int(telemetry.get("final_size_bytes", 0))
+        diff_pct = _safe_float(telemetry.get("size_diff_pct", 0.0))
+        total_minutes = _safe_float(telemetry.get("conversion_total_minutes", 0.0))
+
+        self.lbl_initial_size.setText(f"Initial size: {_format_size_bytes(initial_size) if initial_size > 0 else '-'}")
+        if initial_size > 0 and final_size > 0:
+            self.lbl_final_size.setText(f"Final size: {_format_size_bytes(final_size)} (-{abs(diff_pct):.2f}%)")
+        else:
+            self.lbl_final_size.setText(f"Final size: {_format_size_bytes(final_size) if final_size > 0 else '-'}")
+
+        self.lbl_total_minutes.setText(f"Total conversion time: {total_minutes:.2f} min" if total_minutes > 0 else "Total conversion time: -")
+
+        self._gen_log_local_path = str(telemetry.get("gen_log_local_path", "") or "")
+        self._ff_log_local_path = str(telemetry.get("ff_log_local_path", "") or "")
+
+        if total_minutes <= 0.0:
+            total_minutes = _minutes_from_general_log_text(str(telemetry.get("gen_log", "") or ""))
+        if total_minutes <= 0.0 and self._gen_log_local_path:
+            total_minutes = _minutes_from_general_log(self._gen_log_local_path)
+
+        is_completed = str(db_status).upper() == "COMPLETED"
+        self.btn_general_log.setEnabled(is_completed and bool(self._gen_log_local_path) and os.path.exists(self._gen_log_local_path))
+        self.btn_ffmpeg_log.setEnabled(is_completed and bool(self._ff_log_local_path) and os.path.exists(self._ff_log_local_path))
+        self.lbl_total_minutes.setText(f"Total conversion time: {total_minutes:.2f} min" if total_minutes > 0 else "Total conversion time: -")
+
+    def _summary_height(self) -> int:
+        summary_item = self.foldout_layout.itemAt(0)
+        if not summary_item:
+            return 90
+        summary_widget = summary_item.widget()
+        if not summary_widget:
+            return 90
+        return max(90, summary_widget.sizeHint().height())
 
     def eventFilter(self, obj, event):
         if obj == self.top_row_container and event.type() == QEvent.Type.MouseButtonRelease:
@@ -219,10 +365,11 @@ class MediaCardWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
+            summary_h = self._summary_height()
             if getattr(self.flowchart_view, '_is_revealed', False):
-                target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + 20
+                target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + summary_h + 20
             else:
-                target_h = 190
+                target_h = summary_h + 190
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
@@ -243,7 +390,8 @@ class MediaCardWidget(QFrame):
     def _sync_foldout_height(self, chart_height: int):
         if self.foldout_container.maximumHeight() == 0:
             return
-        target_h = max(190, int(chart_height) + 20)
+        summary_h = self._summary_height()
+        target_h = max(summary_h + 190, int(chart_height) + summary_h + 20)
         anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
         anim.setDuration(280)
         anim.setStartValue(self.foldout_container.height())
@@ -299,12 +447,8 @@ class MediaCardWidget(QFrame):
         self.lbl_state_val.style().unpolish(self.lbl_state_val)
         self.lbl_state_val.style().polish(self.lbl_state_val)
             
-        self.prog_bar_dl.setProperty("class", pb_style)
-        self.prog_bar_dl.style().unpolish(self.prog_bar_dl)
-        self.prog_bar_dl.style().polish(self.prog_bar_dl)
-            
         self.lbl_size_val.setText(size_str)
-        self.prog_bar_dl.setValue(int(prog_val * 100))
+        self.prog_bar_dl.set_data(human_state, int(prog_val * 100))
         self.lbl_speed_display.setText("-" if prog_val >= 1.0 or "0.0 MB" in speed_str else speed_str)
 
     def update_telemetry_ui(self, episodes_data: list):
@@ -348,6 +492,7 @@ class MediaCardWidget(QFrame):
         self.prog_pill_conv.set_data(state_text, percentage)
         self.prog_pill_conv.update()
         self.prog_pill_conv.repaint()
+        self._update_foldout_summary(first_ep, db_status)
         
         stage_flags_raw = first_ep.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
@@ -496,6 +641,10 @@ class EpisodeRowWidget(QFrame):
         self.foldout_container.setMaximumHeight(0) 
         self.foldout_layout = QVBoxLayout(self.foldout_container)
         self.foldout_layout.setContentsMargins(10, 0, 10, 0)
+
+        self._gen_log_local_path = ""
+        self._ff_log_local_path = ""
+        self._build_foldout_summary_panel()
         
         self.flowchart_view = ConversionFlowViewer()
         self.flowchart_view.height_calculated.connect(self._sync_foldout_height)
@@ -503,6 +652,84 @@ class EpisodeRowWidget(QFrame):
         self.main_layout.addWidget(self.foldout_container)
 
         self.top_row_container.installEventFilter(self)
+
+    def _build_foldout_summary_panel(self) -> None:
+        panel = QWidget()
+        panel.setObjectName("FoldoutStatsPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 10, 8, 8)
+        panel_layout.setSpacing(4)
+
+        row_metrics = QHBoxLayout()
+        row_metrics.setSpacing(18)
+
+        self.lbl_initial_size = QLabel("Initial size: -")
+        self.lbl_final_size = QLabel("Final size: -")
+        self.lbl_total_minutes = QLabel("Total conversion time: -")
+        for lbl in (self.lbl_initial_size, self.lbl_final_size, self.lbl_total_minutes):
+            lbl.setObjectName("SubText")
+            row_metrics.addWidget(lbl)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        log_icon_path = os.path.join(base_dir, "assets", "icons8-log.svg")
+        self.btn_general_log = QPushButton("General log")
+        self.btn_ffmpeg_log = QPushButton("FFmpeg log")
+        for btn in (self.btn_general_log, self.btn_ffmpeg_log):
+            btn.setObjectName("ActionIconButton")
+            btn.setMinimumHeight(30)
+            btn.setIcon(QIcon(log_icon_path))
+            btn.setIconSize(QSize(16, 16))
+            btn.setEnabled(False)
+        self.btn_general_log.clicked.connect(lambda: self._open_log_file(self._gen_log_local_path))
+        self.btn_ffmpeg_log.clicked.connect(lambda: self._open_log_file(self._ff_log_local_path))
+
+        row_metrics.addStretch(1)
+        row_metrics.addWidget(self.btn_general_log)
+        row_metrics.addWidget(self.btn_ffmpeg_log)
+        panel_layout.addLayout(row_metrics)
+
+        self.foldout_layout.addWidget(panel)
+
+    def _open_log_file(self, file_path: str) -> None:
+        if not file_path or not os.path.exists(file_path):
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _update_foldout_summary(self, telemetry: dict, db_status: str) -> None:
+        initial_size = _safe_int(telemetry.get("initial_size_bytes", 0))
+        final_size = _safe_int(telemetry.get("final_size_bytes", 0))
+        diff_pct = _safe_float(telemetry.get("size_diff_pct", 0.0))
+        total_minutes = _safe_float(telemetry.get("conversion_total_minutes", 0.0))
+
+        self.lbl_initial_size.setText(f"Initial size: {_format_size_bytes(initial_size) if initial_size > 0 else '-'}")
+        if initial_size > 0 and final_size > 0:
+            self.lbl_final_size.setText(f"Final size: {_format_size_bytes(final_size)} (-{abs(diff_pct):.2f}%)")
+        else:
+            self.lbl_final_size.setText(f"Final size: {_format_size_bytes(final_size) if final_size > 0 else '-'}")
+
+        self.lbl_total_minutes.setText(f"Total conversion time: {total_minutes:.2f} min" if total_minutes > 0 else "Total conversion time: -")
+
+        self._gen_log_local_path = str(telemetry.get("gen_log_local_path", "") or "")
+        self._ff_log_local_path = str(telemetry.get("ff_log_local_path", "") or "")
+
+        if total_minutes <= 0.0:
+            total_minutes = _minutes_from_general_log_text(str(telemetry.get("gen_log", "") or ""))
+        if total_minutes <= 0.0 and self._gen_log_local_path:
+            total_minutes = _minutes_from_general_log(self._gen_log_local_path)
+
+        is_completed = str(db_status).upper() == "COMPLETED"
+        self.btn_general_log.setEnabled(is_completed and bool(self._gen_log_local_path) and os.path.exists(self._gen_log_local_path))
+        self.btn_ffmpeg_log.setEnabled(is_completed and bool(self._ff_log_local_path) and os.path.exists(self._ff_log_local_path))
+        self.lbl_total_minutes.setText(f"Total conversion time: {total_minutes:.2f} min" if total_minutes > 0 else "Total conversion time: -")
+
+    def _summary_height(self) -> int:
+        summary_item = self.foldout_layout.itemAt(0)
+        if not summary_item:
+            return 90
+        summary_widget = summary_item.widget()
+        if not summary_widget:
+            return 90
+        return max(90, summary_widget.sizeHint().height())
 
     def eventFilter(self, obj, event):
         if obj == self.top_row_container and event.type() == QEvent.Type.MouseButtonRelease:
@@ -530,10 +757,11 @@ class EpisodeRowWidget(QFrame):
 
         if is_opening:
             self.foldout_container.setVisible(True)
+            summary_h = self._summary_height()
             if getattr(self.flowchart_view, '_is_revealed', False):
-                target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + 20
+                target_h = int(getattr(self.flowchart_view, '_forced_h', 500)) + summary_h + 20
             else:
-                target_h = 190
+                target_h = summary_h + 190
             self._foldout_anim.setStartValue(0)
             self._foldout_anim.setEndValue(target_h)
             def on_open_finished(): 
@@ -554,7 +782,8 @@ class EpisodeRowWidget(QFrame):
     def _sync_foldout_height(self, chart_height: int):
         if self.foldout_container.maximumHeight() == 0:
             return
-        target_h = max(190, int(chart_height) + 20)
+        summary_h = self._summary_height()
+        target_h = max(summary_h + 190, int(chart_height) + summary_h + 20)
         anim = QPropertyAnimation(self.foldout_container, b"maximumHeight", self)
         anim.setDuration(280)
         anim.setStartValue(self.foldout_container.height())
@@ -635,6 +864,7 @@ class EpisodeRowWidget(QFrame):
             self.lbl_conv_status.style().unpolish(self.lbl_conv_status)
             self.lbl_conv_status.style().polish(self.lbl_conv_status)
             self.prog_pill_conv.set_data("Not Started", 0)
+            self._update_foldout_summary({}, "NOT STARTED")
             self.flowchart_view.update_pipeline_state({"p1-input": True, "p1-queue": True})
             return
 
@@ -667,6 +897,7 @@ class EpisodeRowWidget(QFrame):
         self.prog_pill_conv.set_data(state_text, percentage)
         self.prog_pill_conv.update()
         self.prog_pill_conv.repaint()
+        self._update_foldout_summary(ep_data, db_status)
 
         stage_flags_raw = ep_data.get("stage_results", {})
         if isinstance(stage_flags_raw, str):
@@ -794,12 +1025,9 @@ class SeriesCardWidget(QWidget):
         status_layout.addWidget(sz_container)
 
         pr_container, pr_v = create_status_column("Torrent Progress", 90)
-        self.prog_bar_dl = QProgressBar()
-        self.prog_bar_dl.setRange(0, 100)
-        self.prog_bar_dl.setValue(0)
-        self.prog_bar_dl.setFormat("%p%")
-        self.prog_bar_dl.setFixedSize(80, 24)
-        self.prog_bar_dl.setProperty("class", "PbUnknown")
+        from src.ui.components.progress_pill import ProgressPillWidget
+        self.prog_bar_dl = ProgressPillWidget()
+        self.prog_bar_dl.set_data("Not Started", 0)
         pr_v.addWidget(self.prog_bar_dl)
         status_layout.addWidget(pr_container)
 
@@ -958,13 +1186,9 @@ class SeriesCardWidget(QWidget):
         self.lbl_state_val.style().unpolish(self.lbl_state_val)
         self.lbl_state_val.style().polish(self.lbl_state_val)
             
-        self.prog_bar_dl.setProperty("class", pb_style)
-        self.prog_bar_dl.style().unpolish(self.prog_bar_dl)
-        self.prog_bar_dl.style().polish(self.prog_bar_dl)
-            
         self.lbl_size_val.setText(size_str)
         self.lbl_speed_display.setText(speed_str)
-        self.prog_bar_dl.setValue(int(prog_val * 100))
+        self.prog_bar_dl.set_data(human_state, int(prog_val * 100))
 
     def _ensure_episode_row(self, rel_path: str, tmdb_episodes: dict = None):
         # 1. Extract ep_num immediately

@@ -246,16 +246,33 @@ class MediaController(QObject):
     def start_ssh_telemetry(self, flow_index: int, target_title: str):
         # 1. Check if the item is already completely converted in the DB
         item = self.repo.get_item(flow_index)
+        should_run_once_for_logs = False
         if item and item.conversion_data:
             try:
                 import json
                 c_data = json.loads(item.conversion_data)
                 # If it's a list of jobs (episodes/movies) and ALL are completed
                 if c_data and isinstance(c_data, list) and all(r.get("db_status", "").upper() == "COMPLETED" for r in c_data):
-                    logger.info(f"Item '{target_title}' is already fully converted. Skipping SSH telemetry.")
+                    missing_local_logs = False
+                    for row in c_data:
+                        gen_local = str(row.get("gen_log_local_path", "") or "")
+                        ff_local = str(row.get("ff_log_local_path", "") or "")
+                        if not gen_local or not os.path.exists(gen_local):
+                            missing_local_logs = True
+                        if not ff_local or not os.path.exists(ff_local):
+                            missing_local_logs = True
+
+                    if missing_local_logs:
+                        should_run_once_for_logs = True
+                        logger.info(f"Item '{target_title}' completed but local logs are missing. Running one-shot SSH telemetry hydration.")
+                    else:
+                        logger.info(f"Item '{target_title}' is already fully converted and logs are on disk. Skipping SSH telemetry.")
+                        from src.application.events import event_bus
+                        event_bus.conversion_updated_signal.emit(flow_index)
+                        return
+
                     from src.application.events import event_bus
                     event_bus.conversion_updated_signal.emit(flow_index)
-                    return
             except Exception:
                 pass
 
@@ -263,7 +280,14 @@ class MediaController(QObject):
         logger.info(f"Initializing SSH telemetry for: {target_title}")
         from src.application.use_cases.sync_use_cases import SyncConversionStateUseCase
         sync_uc = SyncConversionStateUseCase(self.repo)
-        ssh_worker = SSHTelemetryClient(repo=self.repo, sync_use_case=sync_uc, item_id=flow_index, target_title=target_title, parent=self)
+        ssh_worker = SSHTelemetryClient(
+            repo=self.repo,
+            sync_use_case=sync_uc,
+            item_id=flow_index,
+            target_title=target_title,
+            run_once=should_run_once_for_logs,
+            parent=self
+        )
         self._threads.append(ssh_worker)
         ssh_worker.start()
 

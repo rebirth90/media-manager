@@ -118,24 +118,23 @@ class MainDashboard(QMainWindow):
 
     def _wait_for_initial_grid_ready(self, items):
         expected_ids = {item.id for item in items}
-        started_ms = 0
+        if not expected_ids:
+            self._fade_out_overlay()
+            return
 
         def poll_ready():
-            nonlocal started_ms
-            started_ms += 200
-
             rendered_ids = {getattr(f, 'db_id', None) for f in self.media_grid.all_flows}
-            if expected_ids.issubset(rendered_ids):
+            if not expected_ids.issubset(rendered_ids):
+                QTimer.singleShot(250, poll_ready)
+                return
+
+            if all(self._is_flow_render_ready(item_id) for item_id in expected_ids):
                 self._fade_out_overlay()
                 return
 
-            if started_ms >= 10000:
-                self._fade_out_overlay()
-                return
+            QTimer.singleShot(250, poll_ready)
 
-            QTimer.singleShot(200, poll_ready)
-
-        QTimer.singleShot(200, poll_ready)
+        QTimer.singleShot(250, poll_ready)
 
     def _apply_modal_blur(self):
         self._modal_blur_locks += 1
@@ -171,6 +170,18 @@ class MainDashboard(QMainWindow):
             flowchart = getattr(flow, 'flowchart_view', None)
             if not flowchart or not getattr(flowchart, '_page_loaded', False):
                 return False
+
+            # Ensure nested episode flowcharts are also initialized when present.
+            episode_map = getattr(flow, 'episodes_map', {}) or {}
+            seen_rows = set()
+            for row in episode_map.values():
+                row_id = id(row)
+                if row_id in seen_rows:
+                    continue
+                seen_rows.add(row_id)
+                ep_chart = getattr(row, 'flowchart_view', None)
+                if ep_chart and not getattr(ep_chart, '_page_loaded', False):
+                    return False
 
         return True
 

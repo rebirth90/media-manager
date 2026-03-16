@@ -1,7 +1,8 @@
 import json
-from PyQt6.QtWidgets import QWidget
-from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
-from PyQt6.QtCore import Qt, QRectF
+import os
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
+from PyQt6.QtGui import QMovie
+from PyQt6.QtCore import Qt
 import re
 
 def calculate_conversion_progress(telemetry_data: dict) -> tuple[str, int]:
@@ -104,56 +105,44 @@ class ProgressPillWidget(QWidget):
         self._state_text = "Not Started"
         self._percentage = 0
         self.setFixedHeight(24)
-        self.setMinimumWidth(60)
+        self.setMinimumWidth(80)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 0, 4, 0)
+        lay.setSpacing(6)
+
+        self._icon_label = QLabel(self)
+        self._icon_label.setFixedSize(16, 16)
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._text_label = QLabel("0%", self)
+        self._text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._text_label.setObjectName("SubText")
+
+        lay.addWidget(self._icon_label)
+        lay.addWidget(self._text_label)
+        lay.addStretch(1)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        gif_path = os.path.join(base_dir, "assets", "icons8-loading-48.gif")
+        self._movie = QMovie(gif_path)
+        self._movie.setScaledSize(self._icon_label.size())
+        self._icon_label.setMovie(self._movie)
+        self._movie.start()
     
     def set_data(self, state_text: str, percentage: int):
         # Anti-Flicker check: Don't trigger repaints if nothing actually changed
         if self._state_text != state_text or self._percentage != percentage:
             self._state_text = state_text
             self._percentage = percentage
-            self.update()
+            self._text_label.setText(f"{self._percentage}%")
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            is_terminal = self._state_text == "Completed" or "Failed" in self._state_text or self._state_text == "Not Started"
+            if is_terminal:
+                self._movie.stop()
+            else:
+                if self._movie.state() != QMovie.MovieState.Running:
+                    self._movie.start()
 
-        rect = self.rect()
-        margin = 0
-        pill_rect = QRectF(float(margin), float(margin), float(rect.width() - (margin * 2)), float(rect.height() - (margin * 2)))
-        radius = pill_rect.height() / 2.0
-
-        bg_color = QColor("#2D2D30")
-        fill_color = QColor("#007ACC") 
-        text_color = QColor("#FFFFFF")
-        
-        if self._state_text == "Completed": fill_color = QColor("#28A745")
-        elif "Failed" in self._state_text: fill_color = QColor("#DC3545")
-        elif self._state_text == "Not Started": fill_color = QColor("#6C757D")
-
-        # Draw Background
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(bg_color)
-        painter.drawRoundedRect(pill_rect, radius, radius)
-
-        # Draw Progress Fill
-        if self._percentage > 0:
-            fill_width = pill_rect.width() * (self._percentage / 100.0)
-            progress_rect = QRectF(pill_rect.x(), pill_rect.y(), fill_width, pill_rect.height())
-            painter.setBrush(fill_color)
-            
-            path = QPainterPath()
-            path.addRoundedRect(pill_rect, radius, radius)
-            painter.setClipPath(path)
-            painter.drawRect(progress_rect)
-            painter.setClipping(False)
-
-        # Draw Text (Percentage Only)
-        font = self.font()
-        font.setPointSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(QPen(text_color))
-        display_text = f"{self._percentage}%"
-        painter.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, display_text)
-
-        painter.end()
+    def setValue(self, value: int):
+        self.set_data(self._state_text, int(value))

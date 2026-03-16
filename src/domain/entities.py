@@ -23,6 +23,14 @@ class ConversionJob:
     gen_log: str = ""
     ff_tail: str = ""
     prog: int = 0
+    initial_size_bytes: int = 0
+    final_size_bytes: int = 0
+    size_diff_pct: float = 0.0
+    conversion_total_minutes: float = 0.0
+    gen_log_remote_path: str = ""
+    ff_log_remote_path: str = ""
+    gen_log_local_path: str = ""
+    ff_log_local_path: str = ""
 
 @dataclass
 class MediaItem:

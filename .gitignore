@@ -49,3 +49,6 @@ ehthumbs.db
 .qt_cache/
 local_data.db
 test_local.db
+
+# Torrent and conversion data
+temp_torrents/
