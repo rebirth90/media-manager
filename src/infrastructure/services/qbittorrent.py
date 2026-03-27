@@ -134,12 +134,25 @@ class QBittorrentPollingThread(QThread):
                     
                     # Prevent redundant qBittorrent processing if already completed
                     if t_info.get("human_state") == "Completed":
-                        # Always reconcile season packs against live qB state.
-                        # A stale-but-sized cache can still point to the wrong torrent snapshot.
                         if not item.is_season:
                             # Fully cached movie. Emit DB state directly and skip API evaluation.
                             self.sync_use_case.execute(item.id, t_data)
                             continue
+                        # TV series: also freeze if conversion is fully done.
+                        # After conversion completes, torrent files are removed and qBittorrent
+                        # reports MissingFiles. Freezing here keeps the UI at "Completed".
+                        if item.is_season and item.conversion_data:
+                            try:
+                                c_info = json.loads(item.conversion_data)
+                                if isinstance(c_info, dict): c_info = [c_info]
+                                if c_info and all(
+                                    str(r.get("db_status", "")).upper() == "COMPLETED"
+                                    for r in c_info
+                                ):
+                                    self.sync_use_case.execute(item.id, t_data)
+                                    continue
+                            except Exception:
+                                pass
                     
                     current_hash = t_info.get("hash", "")
                     expected_name = t_info.get("name", "")
