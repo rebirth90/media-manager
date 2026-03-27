@@ -7,6 +7,10 @@ Media Manager is a PyQt6 desktop app for managing torrent-driven media workflows
 - track encoding/telemetry states
 - inspect conversion pipeline visuals and logs per item
 
+<img width="1920" height="1080" alt="{40AFD82D-C7E2-4467-959A-43392FC5F6FA}" src="https://github.com/user-attachments/assets/87997a3c-659d-4201-90e5-10c8799e2bde" />
+<img width="1920" height="1080" alt="{D2F87C9A-859B-44A6-A9F1-3A5597622AE1}" src="https://github.com/user-attachments/assets/f6565e44-0af2-4193-a428-18050aa775fc" />
+
+
 ## Current Capabilities
 
 ### Torrent and Progress Pipeline
